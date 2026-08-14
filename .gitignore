@@ -1,0 +1,14 @@
+# ARM toolchain — installed to ~/.local/share/gcc-arm-none-eabi/
+gcc-arm-none-eabi*/
+
+# Build artifacts
+build/
+*.bin
+*.elf
+*.hex
+*.map
+*.o
+*.d
+
+# macOS
+.DS_Store

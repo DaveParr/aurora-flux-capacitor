@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+
+      "Bash(make*)",
+
+      "Bash(ls*)",
+      "Bash(find*)",
+      "Bash(cat*)",
+      "Bash(echo*)",
+      "Bash(mkdir*)",
+      "Bash(cp*)",
+      "Bash(mv*)",
+      "Bash(sync)",
+      "Bash(lsblk*)",
+
+      "Bash(~/.local/share/gcc-arm-none-eabi/*/bin/*)",
+
+      "Bash(grep*)",
+      "Bash(bash *)",
+      "Bash(g++*)"
+    ],
+    "ask": [
+      "Bash(curl*)",
+      "Bash(rm*)"
+    ]
+  }
+}
