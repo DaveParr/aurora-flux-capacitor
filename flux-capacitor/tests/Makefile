@@ -1,11 +1,14 @@
 CXX      = g++
-CXXFLAGS = -std=c++14 -Wall -I.. -I../../lib/Aurora-SDK/libs/DaisySP/Source
+CXXFLAGS = -std=c++14 -Wall -I.. -I../../lib/Aurora-SDK/libs/DaisySP/Source -I../../lib/Aurora-SDK/libs/DaisySP/Source/Utility -I../../lib/Aurora-SDK/libs/DaisySP/Source/Control
 
 DOCTEST_URL = https://raw.githubusercontent.com/doctest/doctest/master/doctest/doctest.h
 DOCTEST_H   = doctest.h
 
-all: $(DOCTEST_H) test_warp_control
+DAISYSP_SRC = ../../lib/Aurora-SDK/libs/DaisySP/Source/Control/phasor.cpp
+
+all: $(DOCTEST_H) test_warp_control test_tape_voice
 	./test_warp_control
+	./test_tape_voice
 
 $(DOCTEST_H):
 	curl -sSL $(DOCTEST_URL) -o $@
@@ -13,5 +16,8 @@ $(DOCTEST_H):
 test_warp_control: test_warp_control.cpp $(DOCTEST_H)
 	$(CXX) $(CXXFLAGS) -o $@ $<
 
+test_tape_voice: test_tape_voice.cpp $(DAISYSP_SRC) $(DOCTEST_H)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(DAISYSP_SRC)
+
 clean:
-	rm -f test_warp_control $(DOCTEST_H)
+	rm -f test_warp_control test_tape_voice $(DOCTEST_H)
