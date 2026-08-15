@@ -42,8 +42,25 @@ quantized lookup with a continuous formula:
 
 ```cpp
 float ratio = powf(2.0f, semitones / 12.0f);       // continuous, no table
-mod_freq_   = ((ratio - 1.0f) * sr_) / del_size_;   // same as PitchShifter, but ratio is continuous
+mod_freq_   = fabsf(ratio - 1.0f) * sr_ / del_size_; // magnitude of the ratio's deviation from 1
 ```
+
+**Correction (found during implementation review, not in the original
+draft):** the crossfade rate must be `fabsf(ratio - 1.0f)`, not
+`(ratio - 1.0f)`. Taking `fabsf(semitones)` before the exponent (as an
+earlier draft of this formula did) makes downward and upward shifts of
+the same magnitude compute the *same* `ratio` and thus the same crossfade
+rate — which is wrong, since a downshift's `ratio` is `< 1.0` and an
+upshift's is `> 1.0`; only the deviation from 1.0 should be forced
+positive, not the input semitones. Getting this wrong produces
+badly-out-of-tune (or, at `ratio - 1.0f` exactly negative enough,
+silent — `Phasor` clamps negative frequencies to 0) downward pitch
+bend, while upward bend looks fine — an easy bug to miss without a test
+that actually checks output *pitch*, not just that the output is
+finite. **Phase 2 (tape-stop) will hit this same trap**: slowing tape
+speed toward 0 is inherently a downward-shift-shaped problem, so any
+`speed`-to-`mod_freq`-style formula there should be checked against
+this same fabsf-placement mistake before assuming it's correct.
 
 Everything else — the two `DelayLine<float, SHIFT_BUFFER_SIZE>` taps,
 the `Phasor`-driven crossfade, the sine-windowed gain on each tap — is
