@@ -3,7 +3,10 @@
  *  Phase 2: FREEZE-driven tape stop with a MIX dry/wet blend, layered
  *  on top of Phase 1's WARP knob/CV pitch bend. True stereo. LED_1-6
  *  show the WARP pitch shift as a bar-graph; LED_FREEZE tracks the
- *  tape-stop fade.
+ *  tape-stop fade. Only when MIX is dialed fully to 0 does FREEZE
+ *  auto-override to fully wet while actively stopping/stopped/starting
+ *  (otherwise the effect would be silent), settling back to 0 once
+ *  play resumes. Any other MIX setting is untouched by FREEZE.
  *  See docs/superpowers/specs/2026-08-15-flux-capacitor-phase1-pitch-bend-design.md,
  *  docs/superpowers/specs/2026-08-16-flux-capacitor-warp-led-feedback-design.md, and
  *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase2-tape-stop-design.md
@@ -45,8 +48,9 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 
     float rawMix = ComputeMix(hw.GetKnobValue(KNOB_MIX), hw.GetCvValue(CV_MIX));
     float mix     = mixSmoother.Process(rawMix, mixSmoothCoeff);
+    float effectiveMix = ComputeEffectiveMix(mix, speed);
     float dryGain, wetGain;
-    ComputeMixGains(mix, &dryGain, &wetGain);
+    ComputeMixGains(effectiveMix, &dryGain, &wetGain);
 
     for (size_t i = 0; i < size; i++)
     {
