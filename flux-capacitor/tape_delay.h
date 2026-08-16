@@ -55,16 +55,17 @@ inline float ComputeDelaySamples(float base_seconds, float speed, float sample_r
 }
 
 /** Applies a wow/flutter semitone offset (the same per-sample value
- *  TapeVoice already consumes for pitch) to a delay-sample count as a
- *  multiplicative ratio -- physically honest, since a real tape
- *  transport's speed wobble changes pitch and echo timing together
- *  from the same underlying variation. Matches tape_voice.h's
- *  ComputeModFreq ratio-from-semitones relation.
+ *  TapeVoice already consumes for pitch) to a delay-sample count via
+ *  inverse ratio -- wobble_semitones shares StopSemitones's speed
+ *  convention (faster = positive). ComputeDelaySamples already shortens
+ *  delay for faster speed (base_samples / fmax(speed, kMinStopSpeed)),
+ *  so this divides by the same ratio tape_voice.h's ComputeModFreq would
+ *  multiply by for pitch: wobble moves delay time oppositely to pitch.
  */
 inline float ApplyWobbleToDelaySamples(float delay_samples, float wobble_semitones)
 {
     float ratio = powf(2.0f, wobble_semitones / 12.0f);
-    return delay_samples * ratio;
+    return delay_samples / ratio;
 }
 
 using TapeDelayLine = daisysp::DelayLine<float, kTapeDelayMaxSamples>;

@@ -49,9 +49,9 @@ TEST_CASE("ApplyWobbleToDelaySamples - zero wobble leaves samples unchanged") {
     CHECK(ApplyWobbleToDelaySamples(100.0f, 0.0f) == doctest::Approx(100.0f));
 }
 
-TEST_CASE("ApplyWobbleToDelaySamples - +12 semitones doubles, -12 halves") {
-    CHECK(ApplyWobbleToDelaySamples(100.0f, 12.0f) == doctest::Approx(200.0f));
-    CHECK(ApplyWobbleToDelaySamples(100.0f, -12.0f) == doctest::Approx(50.0f));
+TEST_CASE("ApplyWobbleToDelaySamples - +12 semitones halves, -12 doubles") {
+    CHECK(ApplyWobbleToDelaySamples(100.0f, 12.0f) == doctest::Approx(50.0f));
+    CHECK(ApplyWobbleToDelaySamples(100.0f, -12.0f) == doctest::Approx(200.0f));
 }
 
 TEST_CASE("TapeDelay - impulse produces decaying, bounded repeats at the expected spacing") {
@@ -119,4 +119,36 @@ TEST_CASE("TapeDelay - zero wobble and full speed reproduce ComputeDelaySamples 
         }
     }
     CHECK(firstRepeatSample == 50);
+}
+
+TEST_CASE("TapeDelay - wobble affects delay timing as expected") {
+    TapeDelayLine linePos;
+    TapeDelayLine lineNeg;
+    TapeDelay     delayPos;
+    TapeDelay     delayNeg;
+    delayPos.Init(&linePos, 48000.0f);
+    delayNeg.Init(&lineNeg, 48000.0f);
+    delayPos.Update(100.0f / 48000.0f, 1.0f); // target 100 samples
+    delayNeg.Update(100.0f / 48000.0f, 1.0f);
+
+    // Positive wobble (higher speed) should shorten the delay;
+    // negative wobble (lower speed) should lengthen it.
+    int posRepeatSample = -1;
+    int negRepeatSample = -1;
+
+    for (int i = 0; i < 400; i++) {
+        float in = (i == 0) ? 1.0f : 0.0f;
+        float posWet = delayPos.Process(in, 12.0f); // +12 semitones = 2x speed -> half delay
+        float negWet = delayNeg.Process(in, -12.0f); // -12 semitones = 0.5x speed -> 2x delay
+
+        if (posRepeatSample < 0 && i > 0 && fabsf(posWet) > 0.5f)
+            posRepeatSample = i;
+        if (negRepeatSample < 0 && i > 0 && fabsf(negWet) > 0.5f)
+            negRepeatSample = i;
+    }
+
+    // Positive wobble halves the delay (100 -> 50 samples)
+    // Negative wobble doubles the delay (100 -> 200 samples)
+    CHECK(posRepeatSample == 50);
+    CHECK(negRepeatSample == 200);
 }
