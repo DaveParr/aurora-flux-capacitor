@@ -137,10 +137,15 @@ int main(void)
 
     // WARP pitch-shift bar-graph: LED_4/5/6 light amber outward for an
     // upward shift, LED_3/2/1 light cyan outward for a downward shift,
-    // brightness breathing with the wow/flutter modulation amount.
+    // brightness breathing with the wow/flutter modulation amount. When
+    // WARP is centered, all 6 LEDs instead show a cyan-to-amber gradient
+    // across the bar (a "centered" rest indicator), crossfading smoothly
+    // into the normal bar-graph as the knob leaves center.
     // LED_FREEZE lights red, brightness tracking (1 - tape speed), except
     // it briefly flashes white whenever MIX crosses the fully-dry
-    // auto-wet boundary (see MixDryZoneCrossed).
+    // auto-wet boundary (see MixDryZoneCrossed) -- unaffected by
+    // wow/flutter or the centered gradient either way, since it
+    // represents transport/MIX state, not the pitch-shift display.
     // See docs/superpowers/specs/2026-08-16-flux-capacitor-warp-led-feedback-design.md,
     // docs/superpowers/specs/2026-08-16-flux-capacitor-phase2-tape-stop-design.md, and
     // docs/superpowers/specs/2026-08-16-flux-capacitor-phase3-wow-flutter-design.md
@@ -151,19 +156,27 @@ int main(void)
 
     while (1)
     {
-        WarpLedLevels levels   = ComputeWarpLedLevels(warpSmoother.Value());
-        float          ledScale = ComputeWowFlutterLedScale(wowFlutter.Value());
+        WarpLedLevels levels     = ComputeWarpLedLevels(warpSmoother.Value());
+        float          ledScale   = ComputeWowFlutterLedScale(wowFlutter.Value());
+        float          centerGlow = ComputeWarpCenterGlow(warpSmoother.Value());
         hw.ClearLeds();
         for (int i = 0; i < 3; i++)
         {
+            // Physical left-to-right gradient position: down[0..2] map to
+            // LED_3,LED_2,LED_1 (indices 2,1,0), up[0..2] map to
+            // LED_4,LED_5,LED_6 (indices 3,4,5). See ComputeWarpCenterGradientColor.
+            float gradUp[3], gradDown[3];
+            ComputeWarpCenterGradientColor(3 + i, kWarpDownColor, kWarpUpColor, gradUp);
+            ComputeWarpCenterGradientColor(2 - i, kWarpDownColor, kWarpUpColor, gradDown);
+
             hw.SetLed(upLeds[i],
-                      kWarpUpColor[0] * levels.up[i] * ledScale,
-                      kWarpUpColor[1] * levels.up[i] * ledScale,
-                      kWarpUpColor[2] * levels.up[i] * ledScale);
+                      (kWarpUpColor[0] * levels.up[i] * (1.0f - centerGlow) + gradUp[0] * centerGlow) * ledScale,
+                      (kWarpUpColor[1] * levels.up[i] * (1.0f - centerGlow) + gradUp[1] * centerGlow) * ledScale,
+                      (kWarpUpColor[2] * levels.up[i] * (1.0f - centerGlow) + gradUp[2] * centerGlow) * ledScale);
             hw.SetLed(downLeds[i],
-                      kWarpDownColor[0] * levels.down[i] * ledScale,
-                      kWarpDownColor[1] * levels.down[i] * ledScale,
-                      kWarpDownColor[2] * levels.down[i] * ledScale);
+                      (kWarpDownColor[0] * levels.down[i] * (1.0f - centerGlow) + gradDown[0] * centerGlow) * ledScale,
+                      (kWarpDownColor[1] * levels.down[i] * (1.0f - centerGlow) + gradDown[1] * centerGlow) * ledScale,
+                      (kWarpDownColor[2] * levels.down[i] * (1.0f - centerGlow) + gradDown[2] * centerGlow) * ledScale);
         }
         if (mixFlashBlocksRemaining > 0)
             hw.SetLed(LED_FREEZE, 1.0f, 1.0f, 1.0f); // white: MIX just crossed the fully-dry auto-wet boundary
