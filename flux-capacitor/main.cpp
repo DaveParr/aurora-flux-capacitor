@@ -7,6 +7,7 @@
  *  and docs/superpowers/specs/2026-08-16-flux-capacitor-warp-led-feedback-design.md
  */
 #include "aurora.h"
+#include "dsp_util.h"
 #include "tape_voice.h"
 #include "warp_control.h"
 
@@ -16,7 +17,7 @@ using namespace fluxcap;
 
 Hardware     hw;
 TapeVoice    voiceL, voiceR;
-WarpSmoother warpSmoother;
+OnePoleSmoother warpSmoother;
 float        warpSmoothCoeff = 0.0f;
 
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)

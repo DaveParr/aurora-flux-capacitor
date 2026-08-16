@@ -64,25 +64,4 @@ inline float ComputeWarpSemitones(float knobValue, float warpVoctSemitones)
     return total;
 }
 
-/** One-pole smoother, used to damp ADC/knob jitter on the combined
- *  semitone value before it reaches TapeVoice. This is separate from
- *  TapeVoice's own crossfade mechanism, which is what makes pitch
- *  changes glitch-free.
- */
-class WarpSmoother
-{
-  public:
-    void Init(float initial = 0.0f) { value_ = initial; }
-
-    float Process(float target, float coeff)
-    {
-        daisysp::fonepole(value_, target, coeff);
-        return value_;
-    }
-
-    float Value() const { return value_; }
-
-  private:
-    float value_ = 0.0f;
-};
 } // namespace fluxcap

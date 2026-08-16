@@ -36,31 +36,6 @@ TEST_CASE("ComputeWarpSemitones - values outside the deadzone are unaffected") {
     CHECK(ComputeWarpSemitones(0.5f, 7.0f) == doctest::Approx(7.0f));
 }
 
-TEST_CASE("WarpSmoother - first call moves partway toward target") {
-    WarpSmoother smoother;
-    smoother.Init(0.0f);
-    float result = smoother.Process(12.0f, 0.5f);
-    // fonepole: out += coeff * (target - out) = 0 + 0.5*(12-0) = 6
-    CHECK(result == doctest::Approx(6.0f));
-}
-
-TEST_CASE("WarpSmoother - converges toward target over repeated calls") {
-    WarpSmoother smoother;
-    smoother.Init(0.0f);
-    float result = 0.0f;
-    for (int i = 0; i < 30; i++)
-        result = smoother.Process(12.0f, 0.5f);
-    CHECK(result == doctest::Approx(12.0f).epsilon(0.01));
-}
-
-TEST_CASE("WarpSmoother - Value reflects last Process result") {
-    WarpSmoother smoother;
-    smoother.Init(2.0f);
-    CHECK(smoother.Value() == doctest::Approx(2.0f));
-    smoother.Process(2.0f, 0.5f);
-    CHECK(smoother.Value() == doctest::Approx(2.0f));
-}
-
 TEST_CASE("ComputeWarpLedLevels - zero semitones -> all LEDs off") {
     WarpLedLevels levels = ComputeWarpLedLevels(0.0f);
     for (int i = 0; i < 3; i++) {
