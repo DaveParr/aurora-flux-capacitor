@@ -7,13 +7,14 @@ DOCTEST_H   = doctest.h
 DAISYSP_SRC    = ../../lib/Aurora-SDK/libs/DaisySP/Source/Control/phasor.cpp
 OSCILLATOR_SRC = ../../lib/Aurora-SDK/libs/DaisySP/Source/Synthesis/oscillator.cpp
 
-all: $(DOCTEST_H) test_warp_control test_tape_voice test_dsp_util test_mix_control test_tape_transport test_wow_flutter
+all: $(DOCTEST_H) test_warp_control test_tape_voice test_dsp_util test_mix_control test_tape_transport test_wow_flutter test_tape_delay
 	./test_warp_control
 	./test_tape_voice
 	./test_dsp_util
 	./test_mix_control
 	./test_tape_transport
 	./test_wow_flutter
+	./test_tape_delay
 
 $(DOCTEST_H):
 	curl -sSL $(DOCTEST_URL) -o $@
@@ -36,5 +37,8 @@ test_tape_transport: test_tape_transport.cpp $(DOCTEST_H)
 test_wow_flutter: test_wow_flutter.cpp $(OSCILLATOR_SRC) $(DOCTEST_H)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(OSCILLATOR_SRC)
 
+test_tape_delay: test_tape_delay.cpp $(DOCTEST_H)
+	$(CXX) $(CXXFLAGS) -o $@ $<
+
 clean:
-	rm -f test_warp_control test_tape_voice test_dsp_util test_mix_control test_tape_transport test_wow_flutter $(DOCTEST_H)
+	rm -f test_warp_control test_tape_voice test_dsp_util test_mix_control test_tape_transport test_wow_flutter test_tape_delay $(DOCTEST_H)
