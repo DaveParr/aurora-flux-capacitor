@@ -60,3 +60,65 @@ TEST_CASE("WarpSmoother - Value reflects last Process result") {
     smoother.Process(2.0f, 0.5f);
     CHECK(smoother.Value() == doctest::Approx(2.0f));
 }
+
+TEST_CASE("ComputeWarpLedLevels - zero semitones -> all LEDs off") {
+    WarpLedLevels levels = ComputeWarpLedLevels(0.0f);
+    for (int i = 0; i < 3; i++) {
+        CHECK(levels.up[i] == doctest::Approx(0.0f));
+        CHECK(levels.down[i] == doctest::Approx(0.0f));
+    }
+}
+
+TEST_CASE("ComputeWarpLedLevels - small upward shift lights only innermost up LED, partially") {
+    // 2 semitones is halfway through the first 4-semitone band.
+    WarpLedLevels levels = ComputeWarpLedLevels(2.0f);
+    CHECK(levels.up[0] == doctest::Approx(0.5f));
+    CHECK(levels.up[1] == doctest::Approx(0.0f));
+    CHECK(levels.up[2] == doctest::Approx(0.0f));
+    CHECK(levels.down[0] == doctest::Approx(0.0f));
+    CHECK(levels.down[1] == doctest::Approx(0.0f));
+    CHECK(levels.down[2] == doctest::Approx(0.0f));
+}
+
+TEST_CASE("ComputeWarpLedLevels - small downward shift lights only innermost down LED, partially") {
+    WarpLedLevels levels = ComputeWarpLedLevels(-2.0f);
+    CHECK(levels.down[0] == doctest::Approx(0.5f));
+    CHECK(levels.down[1] == doctest::Approx(0.0f));
+    CHECK(levels.down[2] == doctest::Approx(0.0f));
+    CHECK(levels.up[0] == doctest::Approx(0.0f));
+    CHECK(levels.up[1] == doctest::Approx(0.0f));
+    CHECK(levels.up[2] == doctest::Approx(0.0f));
+}
+
+TEST_CASE("ComputeWarpLedLevels - band boundaries") {
+    // Exactly 4 semitones: innermost LED fully lit, next band still zero.
+    WarpLedLevels at4 = ComputeWarpLedLevels(4.0f);
+    CHECK(at4.up[0] == doctest::Approx(1.0f));
+    CHECK(at4.up[1] == doctest::Approx(0.0f));
+
+    // Exactly 8 semitones: first two LEDs fully lit, third still zero.
+    WarpLedLevels at8 = ComputeWarpLedLevels(8.0f);
+    CHECK(at8.up[0] == doctest::Approx(1.0f));
+    CHECK(at8.up[1] == doctest::Approx(1.0f));
+    CHECK(at8.up[2] == doctest::Approx(0.0f));
+
+    // Exactly 12 semitones: all three fully lit.
+    WarpLedLevels at12 = ComputeWarpLedLevels(12.0f);
+    CHECK(at12.up[0] == doctest::Approx(1.0f));
+    CHECK(at12.up[1] == doctest::Approx(1.0f));
+    CHECK(at12.up[2] == doctest::Approx(1.0f));
+}
+
+TEST_CASE("ComputeWarpLedLevels - beyond full scale clamps, does not overflow or wrap") {
+    WarpLedLevels levels = ComputeWarpLedLevels(60.0f); // max WARP CV range
+    CHECK(levels.up[0] == doctest::Approx(1.0f));
+    CHECK(levels.up[1] == doctest::Approx(1.0f));
+    CHECK(levels.up[2] == doctest::Approx(1.0f));
+    CHECK(levels.down[0] == doctest::Approx(0.0f));
+
+    WarpLedLevels negLevels = ComputeWarpLedLevels(-60.0f);
+    CHECK(negLevels.down[0] == doctest::Approx(1.0f));
+    CHECK(negLevels.down[1] == doctest::Approx(1.0f));
+    CHECK(negLevels.down[2] == doctest::Approx(1.0f));
+    CHECK(negLevels.up[0] == doctest::Approx(0.0f));
+}
