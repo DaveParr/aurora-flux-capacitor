@@ -70,4 +70,18 @@ inline float ComputeEffectiveMix(float user_mix, float speed)
         return user_mix;
     return 1.0f - powf(speed, kAutoWetSteepness);
 }
+
+/** True exactly when `mix` and `prev_mix` fall on opposite sides of
+ *  `kMixFullyDryThreshold` -- i.e. the knob just crossed into or out of
+ *  the auto-wet zone `ComputeEffectiveMix` special-cases. Uses the same
+ *  `>=` boundary convention as `ComputeEffectiveMix` (exactly-at-threshold
+ *  counts as "above"), so the two functions never disagree about where
+ *  the line is.
+ */
+inline bool MixDryZoneCrossed(float mix, float prev_mix)
+{
+    bool wasDry = prev_mix < kMixFullyDryThreshold;
+    bool isDry  = mix < kMixFullyDryThreshold;
+    return wasDry != isDry;
+}
 } // namespace fluxcap

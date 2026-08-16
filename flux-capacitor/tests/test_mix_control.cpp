@@ -71,6 +71,30 @@ TEST_CASE("ComputeEffectiveMix - fully wet user setting is unaffected by speed")
     CHECK(ComputeEffectiveMix(1.0f, 0.5f) == doctest::Approx(1.0f));
 }
 
+TEST_CASE("MixDryZoneCrossed - no crossing when both readings are on the same side") {
+    CHECK(MixDryZoneCrossed(0.0f, 0.0f) == false);   // both dry
+    CHECK(MixDryZoneCrossed(0.01f, 0.02f) == false); // both dry, moved but stayed under threshold
+    CHECK(MixDryZoneCrossed(0.5f, 0.5f) == false);   // both above threshold
+    CHECK(MixDryZoneCrossed(0.3f, 0.9f) == false);   // both above threshold, moved but stayed over
+}
+
+TEST_CASE("MixDryZoneCrossed - true when moving from above threshold to dry (knob goes below)") {
+    CHECK(MixDryZoneCrossed(0.0f, 0.5f) == true);
+    CHECK(MixDryZoneCrossed(0.01f, 0.05f) == true);
+}
+
+TEST_CASE("MixDryZoneCrossed - true when moving from dry to above threshold (knob goes above)") {
+    CHECK(MixDryZoneCrossed(0.5f, 0.0f) == true);
+    CHECK(MixDryZoneCrossed(0.05f, 0.01f) == true);
+}
+
+TEST_CASE("MixDryZoneCrossed - boundary is consistent with ComputeEffectiveMix's own threshold check") {
+    // exactly at the threshold counts as "above" (ComputeEffectiveMix uses >=),
+    // so moving from just-below to exactly-at-threshold is a crossing.
+    CHECK(MixDryZoneCrossed(kMixFullyDryThreshold, kMixFullyDryThreshold * 0.5f) == true);
+    CHECK(MixDryZoneCrossed(kMixFullyDryThreshold, kMixFullyDryThreshold) == false);
+}
+
 TEST_CASE("ComputeEffectiveMix - regression: with MIX at 0, the audible wet contribution "
           "actually exceeds dry for most of an active stop, not just at the extremes") {
     // This is the bug a linear (1 - speed) floor had: StopAmplitude also
