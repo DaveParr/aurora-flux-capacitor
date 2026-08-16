@@ -97,3 +97,46 @@ TEST_CASE("ComputeWarpLedLevels - beyond full scale clamps, does not overflow or
     CHECK(negLevels.down[2] == doctest::Approx(1.0f));
     CHECK(negLevels.up[0] == doctest::Approx(0.0f));
 }
+
+TEST_CASE("ComputeWarpCenterGlow - full glow exactly centered, fading to zero at the range boundary") {
+    CHECK(ComputeWarpCenterGlow(0.0f) == doctest::Approx(1.0f));
+    CHECK(ComputeWarpCenterGlow(kWarpCenterGlowRangeSemitones) == doctest::Approx(0.0f));
+    CHECK(ComputeWarpCenterGlow(-kWarpCenterGlowRangeSemitones) == doctest::Approx(0.0f));
+    CHECK(ComputeWarpCenterGlow(kWarpCenterGlowRangeSemitones * 0.5f) == doctest::Approx(0.5f));
+}
+
+TEST_CASE("ComputeWarpCenterGlow - beyond the range clamps to zero, does not go negative") {
+    CHECK(ComputeWarpCenterGlow(kWarpCenterGlowRangeSemitones * 10.0f) == doctest::Approx(0.0f));
+    CHECK(ComputeWarpCenterGlow(-kWarpCenterGlowRangeSemitones * 10.0f) == doctest::Approx(0.0f));
+}
+
+TEST_CASE("ComputeWarpCenterGradientColor - endpoints are pure down/up color") {
+    const float down[3] = {0.0f, 0.6f, 1.0f};
+    const float up[3]   = {1.0f, 0.4f, 0.0f};
+    float       out[3];
+
+    ComputeWarpCenterGradientColor(0, down, up, out);
+    CHECK(out[0] == doctest::Approx(down[0]));
+    CHECK(out[1] == doctest::Approx(down[1]));
+    CHECK(out[2] == doctest::Approx(down[2]));
+
+    ComputeWarpCenterGradientColor(5, down, up, out);
+    CHECK(out[0] == doctest::Approx(up[0]));
+    CHECK(out[1] == doctest::Approx(up[1]));
+    CHECK(out[2] == doctest::Approx(up[2]));
+}
+
+TEST_CASE("ComputeWarpCenterGradientColor - midpoint is an even blend") {
+    const float down[3] = {0.0f, 0.0f, 1.0f};
+    const float up[3]   = {1.0f, 0.0f, 0.0f};
+    float       out[3];
+
+    // index 2 and 3 straddle the middle of a 6-position (0..5) gradient.
+    ComputeWarpCenterGradientColor(2, down, up, out);
+    CHECK(out[0] == doctest::Approx(0.4f));
+    CHECK(out[2] == doctest::Approx(0.6f));
+
+    ComputeWarpCenterGradientColor(3, down, up, out);
+    CHECK(out[0] == doctest::Approx(0.6f));
+    CHECK(out[2] == doctest::Approx(0.4f));
+}

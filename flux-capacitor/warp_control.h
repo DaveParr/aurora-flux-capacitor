@@ -48,6 +48,43 @@ inline WarpLedLevels ComputeWarpLedLevels(float semitones)
     return levels;
 }
 
+// Semitone range over which the centered-rest LED gradient (see
+// ComputeWarpCenterGlow) fades out. Deliberately much wider than
+// kWarpDeadzoneSemitones (0.05f) -- the deadzone exists to snap tiny
+// ADC noise to a bit-exact dry passthrough, while this constant controls
+// a visibly smooth LED crossfade over a natural knob turn. Using the
+// deadzone's tiny range here would make the fade indistinguishable from
+// a hard on/off snap.
+constexpr float kWarpCenterGlowRangeSemitones = 2.0f;
+
+/** 1.0 exactly at semitones == 0 (WARP centered), fading linearly to 0.0
+ *  by +/-kWarpCenterGlowRangeSemitones, clamped beyond that range. Drives
+ *  the "all LEDs lit, gradient" centered-rest indicator (see
+ *  ComputeWarpCenterGradientColor): callers crossfade the normal per-band
+ *  bar-graph color with the gradient color using this as the blend
+ *  weight, so the two states dissolve into each other smoothly as the
+ *  knob leaves center, with no discontinuity at the deadzone boundary.
+ */
+inline float ComputeWarpCenterGlow(float semitones)
+{
+    return daisysp::fclamp(
+        1.0f - fabsf(semitones) / kWarpCenterGlowRangeSemitones, 0.0f, 1.0f);
+}
+
+/** Interpolated RGB color for LED position `index` (0..5, physical
+ *  left-to-right order LED_1..LED_6) in the centered-rest gradient:
+ *  linearly blends from down_color (index 0) to up_color (index 5).
+ *  Used only when ComputeWarpCenterGlow is nonzero -- callers crossfade
+ *  this against each LED's normal bar-graph color.
+ */
+inline void ComputeWarpCenterGradientColor(
+    int index, const float down_color[3], const float up_color[3], float out[3])
+{
+    float t = static_cast<float>(index) / 5.0f;
+    for (int c = 0; c < 3; c++)
+        out[c] = down_color[c] * (1.0f - t) + up_color[c] * t;
+}
+
 /** Maps KNOB_WARP (0..1, center = 0.5) + a continuous CV semitone offset
  *  (e.g. from hw.GetWarpVoct()) to a combined, unsmoothed semitone value.
  *  Snaps small combined values to exactly 0.0f (see kWarpDeadzoneSemitones)
