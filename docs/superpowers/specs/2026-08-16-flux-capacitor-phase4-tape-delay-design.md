@@ -65,14 +65,27 @@ attribute macro:
 #define DSY_SDRAM_BSS __attribute__((section(".sdram_bss")))
 ```
 
-`TapeDelay`'s two `DelayLine<float, kTapeDelayMaxSamples>` members are
-declared with this attribute, placing ~750KB total in the 64MB SDRAM
-region — trivial headroom there, and it does not compete with
-`TapeVoice`'s DTCMRAM usage at all. `kTapeDelayMaxSamples` is a fixed
-compile-time constant (96,000, i.e. 2s at a nominal 48kHz), following
-`tape_voice.h`'s existing precedent of sizing `DelayLine`'s template
-parameter as a fixed constant rather than dynamically from
-`hw.AudioSampleRate()`.
+**This attribute cannot be applied inside `tape_delay.h` itself.**
+`DSY_SDRAM_BSS` is defined in libDaisy's `dev/sdram.h`, which pulls in
+`daisy_core.h` — a hardware-specific header the host-side doctest build
+(which only sees DaisySP's `Utility`/`Control`/`Synthesis` paths, never
+libDaisy) cannot compile. `TapeVoice` and `WowFlutter` are host-testable
+today precisely because their headers touch only DaisySP, never
+libDaisy; `tape_delay.h` needs to keep that property so `TapeDelay` can
+be unit-tested the same way.
+
+So `TapeDelay` does not own its `DelayLine` as a plain member. Instead,
+`main.cpp` (which already transitively has `DSY_SDRAM_BSS` available —
+it includes `aurora.h`, which includes `daisy_seed.h` → `daisy.h` →
+`dev/sdram.h`) declares the two raw, SDRAM-placed `DelayLine<float,
+kTapeDelayMaxSamples>` buffers as globals, and `TapeDelay::Init` takes
+a pointer to one of them. `tape_delay.h` itself still only includes
+`Utility/delayline.h` (for the `DelayLine` type) and `Utility/dsp.h` —
+never `dev/sdram.h` — so it stays exactly as host-buildable as
+`TapeVoice`. `kTapeDelayMaxSamples` is a fixed compile-time constant
+(96,000, i.e. 2s at a nominal 48kHz), following `tape_voice.h`'s
+existing precedent of sizing `DelayLine`'s template parameter as a
+fixed constant rather than dynamically from `hw.AudioSampleRate()`.
 
 ## Control mapping: TIME -> delay time
 
@@ -149,16 +162,24 @@ matching how `TapeTransport::Update` and the other control-rate
 `WowFlutter::Process` already computes one combined wow+flutter
 semitone offset per sample for `TapeVoice`. `TapeDelay` reuses that
 exact same value as a second modulation target — no second `WowFlutter`
-instance, no second modulation source to tune or keep in phase. This
-is also physically honest: on a real tape machine, one wobbling
-transport drives pitch and echo-timing deviation together, from the
-same underlying speed variation.
+instance, no second modulation source to tune or keep in phase.
+
+**The direction must match `ComputeDelaySamples`'s existing
+speed-to-delay relationship, not mirror the speed-to-pitch one.**
+`wobble_semitones` shares `StopSemitones`'s convention
+(`12*log2f(speed)`): positive means an instantaneous *speed increase*.
+`ComputeDelaySamples` already establishes that faster speed *shortens*
+delay (`base_samples / speed` — a real tape machine's fixed head-gap
+distance takes less time to cross at higher speed). So a positive
+(faster-speed) wobble must shorten delay the same way, by *dividing*
+by the ratio — not multiply, which would move delay time in the same
+direction as pitch instead of the opposite one:
 
 ```cpp
 inline float ApplyWobbleToDelaySamples(float delay_samples, float wobble_semitones)
 {
     float ratio = powf(2.0f, wobble_semitones / 12.0f);
-    return delay_samples * ratio;
+    return delay_samples / ratio;
 }
 ```
 
@@ -239,13 +260,21 @@ breakdown.
 ## `TapeDelay` class
 
 ```cpp
+using TapeDelayLine = daisysp::DelayLine<float, kTapeDelayMaxSamples>;
+
 class TapeDelay
 {
   public:
-    void Init(float sample_rate)
+    // delay_line: caller-owned storage -- main.cpp declares this as an
+    // SDRAM-placed (DSY_SDRAM_BSS) global and passes a pointer here, so
+    // TapeDelay itself never touches a hardware-specific memory-placement
+    // attribute or include (see "Buffer sizing and memory placement").
+    // Caller must keep delay_line alive for as long as this TapeDelay is used.
+    void Init(TapeDelayLine *delay_line, float sample_rate)
     {
+        delay_ = delay_line;
+        delay_->Init();
         sr_ = sample_rate;
-        delay_.Init();
         feedback_lpf_.Init(0.0f);
         feedback_lpf_coeff_ = 1.0f / (kTapeDelayFeedbackLpfTauSeconds * sample_rate);
         target_samples_     = 0.0f;
@@ -264,21 +293,21 @@ class TapeDelay
     float Process(float in, float wobble_semitones)
     {
         float samples = ApplyWobbleToDelaySamples(target_samples_, wobble_semitones);
-        delay_.SetDelay(samples);
+        delay_->SetDelay(samples);
 
-        float wet      = delay_.Read();
+        float wet      = delay_->Read();
         float filtered = feedback_lpf_.Process(wet, feedback_lpf_coeff_);
-        delay_.Write(in + filtered * kTapeDelayFeedback);
+        delay_->Write(in + filtered * kTapeDelayFeedback);
 
         return wet;
     }
 
   private:
-    daisysp::DelayLine<float, kTapeDelayMaxSamples> DSY_SDRAM_BSS delay_;
-    OnePoleSmoother                                                feedback_lpf_; // audio-rate LPF, not a control smoother
-    float                                                          feedback_lpf_coeff_ = 0.0f;
-    float                                                          target_samples_      = 0.0f;
-    float                                                          sr_                  = 48000.0f;
+    TapeDelayLine  *delay_ = nullptr;
+    OnePoleSmoother feedback_lpf_; // audio-rate LPF, not a control smoother
+    float           feedback_lpf_coeff_ = 0.0f;
+    float           target_samples_      = 0.0f;
+    float           sr_                  = 48000.0f;
 };
 ```
 
@@ -287,9 +316,25 @@ Lives in a new `tape_delay.h`, following `wow_flutter.h`/
 functions (`ComputeDelayTimeSeconds`, `ComputeDelaySamples`,
 `ApplyWobbleToDelaySamples`) with the stateful class that consumes
 them in one file, since `TapeDelay` carries real per-sample state like
-its stateful siblings (and unlike stateless `warp_control.h`).
+its stateful siblings (and unlike stateless `warp_control.h`). Unlike
+those siblings, though, `TapeDelay` doesn't own all of its own state —
+its backing buffer lives in caller-owned, SDRAM-placed storage, for the
+host-testability reason above. Host-side tests construct a plain
+(non-`DSY_SDRAM_BSS`) `TapeDelayLine` on the stack and pass its address
+to `Init` — the class itself has no idea whether its buffer is
+SDRAM-placed or not, so this is a faithful test of the same code path
+`main.cpp` uses.
 
 ## Audio callback integration
+
+```cpp
+// Global, SDRAM-placed backing storage for TapeDelay -- see "Buffer
+// sizing and memory placement". main.cpp already transitively has
+// DSY_SDRAM_BSS available via aurora.h -> daisy_seed.h -> daisy.h ->
+// dev/sdram.h, so no new include is needed.
+TapeDelayLine DSY_SDRAM_BSS delayLineL, delayLineR;
+TapeDelay     delayL, delayR;
+```
 
 ```cpp
 float rawDelaySeconds = ComputeDelayTimeSeconds(hw.GetKnobValue(KNOB_TIME), hw.GetCvValue(CV_TIME));
@@ -314,13 +359,16 @@ for (size_t i = 0; i < size; i++)
 }
 ```
 
-`delayL`/`delayR` join `voiceL`/`voiceR`/`transport`/`wowFlutter` as
-top-level globals; `timeSmoother`/`timeSmoothCoeff` join the existing
-smoother/coefficient pairs, initialized the same way in `main()`
-(`timeSmoother.Init(0.0f)`, `timeSmoothCoeff = 1.0f /
-(kTimeSmoothTimeSeconds * hw.AudioCallbackRate())`). `delayL.Init`/
-`delayR.Init` are called alongside `voiceL.Init`/`voiceR.Init` in
-`main()`. `wobble` (already computed this sample for `totalSemis`) is
+`delayLineL`/`delayLineR`/`delayL`/`delayR` join `voiceL`/`voiceR`/
+`transport`/`wowFlutter` as top-level globals; `timeSmoother`/
+`timeSmoothCoeff` join the existing smoother/coefficient pairs,
+initialized the same way in `main()` (`timeSmoother.Init(0.0f)`,
+`timeSmoothCoeff = 1.0f / (kTimeSmoothTimeSeconds *
+hw.AudioCallbackRate())`). `delayL.Init(&delayLineL,
+hw.AudioSampleRate())`/`delayR.Init(&delayLineR, hw.AudioSampleRate())`
+are called alongside `voiceL.Init`/`voiceR.Init` in `main()` — each
+`TapeDelay` bound to its own SDRAM-placed buffer for the process's
+lifetime. `wobble` (already computed this sample for `totalSemis`) is
 passed straight through to both `TapeDelay::Process` calls — no
 recomputation. `TapeDelay::Update` is called once per block, immediately
 after `speed` is available, mirroring where `ComputeMix`/
@@ -352,11 +400,13 @@ Host-testable (doctest, same pattern as `test_wow_flutter.cpp` /
   and `speed` below `kMinStopSpeed` are both clamped identically since
   `ComputeDelaySamples` floors through `kMinStopSpeed` before dividing.
 - `ApplyWobbleToDelaySamples`: `wobble_semitones = 0` -> input unchanged
-  (`ratio == 1.0`); `wobble_semitones = +12` -> doubles the sample
-  count (`ratio == 2.0`, one octave up in tape-speed terms); `-12` ->
-  halves it; matches the same `powf(2.0f, semitones / 12.0f)` relation
-  `tape_voice.h`'s `ComputeModFreq` already uses for its own
-  ratio-from-semitones conversion.
+  (`ratio == 1.0`); `wobble_semitones = +12` (one octave faster, in
+  `StopSemitones`'s speed convention) -> *halves* the sample count
+  (`ratio == 2.0`, divided in); `-12` -> doubles it. Inverse of
+  `tape_voice.h`'s `ComputeModFreq`, which multiplies by this same
+  ratio-from-semitones conversion for pitch — `ApplyWobbleToDelaySamples`
+  divides instead, matching `ComputeDelaySamples`'s own inverse
+  speed-to-delay relationship rather than the direct speed-to-pitch one.
 - `TapeDelay`: feed a unit impulse, assert the first echo peak lands at
   the expected sample offset for a known `Update(base_seconds, speed=1.0)`
   target (accounting for `DelayLine`'s linear interpolation smearing
