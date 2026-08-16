@@ -15,7 +15,6 @@ jobs:
           submodules: recursive
       - name: Build and run host tests
         run: |
-          make -C hello-aurora/tests
           make -C flux-capacitor/tests
 
   build:

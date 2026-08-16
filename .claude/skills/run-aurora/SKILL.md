@@ -35,10 +35,10 @@ Note: `make libdaisy` only builds libDaisy. DaisySP has no root-level target and
 ## Build
 
 ```bash
-make build PROJECT=hello-aurora
+make build PROJECT=flux-capacitor
 ```
 
-Replace `hello-aurora` with the target subdirectory name. The output is `<PROJECT>/build/<PROJECT>.bin`.
+Replace `flux-capacitor` with the target subdirectory name. The output is `<PROJECT>/build/<PROJECT>.bin`.
 
 ## Flash
 
@@ -80,14 +80,14 @@ Do not proceed with two `.bin` files on the drive without explicit instruction.
 make flash PROJECT=<PROJECT> MOUNT=<MOUNT>
 ```
 
-This copies `hello-aurora/build/hello-aurora.bin` to the USB root and calls `sync`. Eject the drive, insert it into the Aurora, and power-cycle the module. The bootloader runs on every boot before the application.
+This copies `flux-capacitor/build/flux-capacitor.bin` to the USB root and calls `sync`. Eject the drive, insert it into the Aurora, and power-cycle the module. The bootloader runs on every boot before the application.
 
 ## Boot log (troubleshooting)
 
 After a boot cycle, the Aurora writes to `<MOUNT>/daisy_boot_log.txt` (where `<MOUNT>` is the USB mount point). Each successful flash appends a numbered line:
 
 ```
-1. Successfully flashed file "hello-aurora.bin" to address 0x90040000
+1. Successfully flashed file "flux-capacitor.bin" to address 0x90040000
 ```
 
 If the line for your `.bin` doesn't appear after power-cycling, the bootloader did not see the file. Common causes:

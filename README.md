@@ -6,21 +6,14 @@ A minimal, ready-to-fork starting point for writing your own firmware for the [Q
 
 | Path | Purpose |
 |------|---------|
-| `hello-aurora/` | Example project: knob-driven LED colours + audio passthrough |
+| `flux-capacitor/` | WARP-controlled continuous-pitch tape-style voice firmware |
 | `lib/Aurora-SDK` | Git submodule — Aurora BSP, libDaisy, DaisySP |
 | `config.mk` | Shared toolchain and SDK path config |
 | `Makefile` | Top-level `build` / `flash` / `libdaisy` targets |
 
-### hello-aurora
+### flux-capacitor
 
-A small firmware that exercises the main hardware features:
-
-- Each knob drives the hue of its paired RGB LED (HSV colour model)
-- `KNOB_MIX` also scales the stereo audio passthrough volume
-- `SW_FREEZE` and `SW_REVERSE` light their attached LEDs white when held
-- `LED_BOT_1/2/3` mirror the first three knob colours (useful for physical position mapping)
-
-The `hello-aurora/tests/` directory has host-side unit tests for the `colour.h` and `audio.h` helpers, built and run with plain `g++` and [doctest](https://github.com/doctest/doctest).
+The `flux-capacitor/tests/` directory has host-side unit tests for the `warp_control.h` and `tape_voice.h` helpers, built and run with plain `g++` and [doctest](https://github.com/doctest/doctest).
 
 ## Getting started
 
@@ -60,7 +53,7 @@ The build uses `gcc-arm-none-eabi`. The default path in `config.mk` is:
 You can install the toolchain there, or override the path at build time:
 
 ```sh
-make build PROJECT=hello-aurora GCC_PATH=/path/to/your/arm-gcc/bin
+make build PROJECT=flux-capacitor GCC_PATH=/path/to/your/arm-gcc/bin
 ```
 
 The [Aurora-SDK README](lib/Aurora-SDK/README.md) has OS-specific toolchain installation instructions for Windows, macOS, and Linux.
@@ -80,18 +73,18 @@ This compiles the libDaisy static library from source inside the submodule. Only
 The tests compile and run on your host machine (no hardware needed):
 
 ```sh
-cd hello-aurora/tests
+cd flux-capacitor/tests
 make
 ```
 
-### 5. Build and flash hello-aurora
+### 5. Build and flash flux-capacitor
 
 ```sh
 # Build
-make build PROJECT=hello-aurora
+make build PROJECT=flux-capacitor
 
 # Copy .bin to USB drive (adjust MOUNT to where your USB drive is mounted)
-make flash PROJECT=hello-aurora MOUNT=/media/YOUR_USER/YOUR_DRIVE
+make flash PROJECT=flux-capacitor MOUNT=/media/YOUR_USER/YOUR_DRIVE
 ```
 
 Then:
@@ -102,10 +95,10 @@ Then:
 **Verify it loaded:** power down, re-insert the USB drive into your computer, and check `daisy_boot_log.txt`. The newest entry should read:
 
 ```
-N. Successfully flashed file "hello-aurora.bin" to address 0x90040000
+N. Successfully flashed file "flux-capacitor.bin" to address 0x90040000
 ```
 
-If the entry is missing or shows an error, check that `hello-aurora.bin` is the only `.bin` file in the root of the drive.
+If the entry is missing or shows an error, check that `flux-capacitor.bin` is the only `.bin` file in the root of the drive.
 
 ## Starting your own project
 
