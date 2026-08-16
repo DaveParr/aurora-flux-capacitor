@@ -85,6 +85,14 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
     for (size_t i = 0; i < size; i++)
     {
         float wobble     = wowFlutter.Process(wowRateHz, flutterDepth);
+        // wobble also feeds TapeVoice::ComputeDryMix (via totalSemis) --
+        // near WARP-centered, this incidentally chorus/AM-modulates the
+        // signal instead of shifting pitch alone, since a small nonzero
+        // semitone value there partially unblends dry and wet rather than
+        // passing through clean. Kept deliberately (reads as authentic
+        // tape wobble character); revisit only if it proves undesirable
+        // on hardware -- the clean fix decouples TapeVoice's dry-blend
+        // decision from its pitch-shift amount, a Phase-1 interface change.
         float totalSemis = warpSemis + StopSemitones(speed) + wobble;
 
         float wetL = voiceL.Process(in[0][i], totalSemis) * wetAmp;
