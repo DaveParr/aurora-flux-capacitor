@@ -13,7 +13,7 @@ A minimal, ready-to-fork starting point for writing your own firmware for the [Q
 
 ### flux-capacitor
 
-The `flux-capacitor/tests/` directory has host-side unit tests for the `warp_control.h` and `tape_voice.h` helpers, built and run with plain `g++` and [doctest](https://github.com/doctest/doctest).
+The `flux-capacitor/tests/` directory has host-side unit tests covering the project's pure-logic headers (control mapping, DSP utilities, tape transport, and voice processing), built and run with plain `g++` and [doctest](https://github.com/doctest/doctest).
 
 ## Getting started
 
