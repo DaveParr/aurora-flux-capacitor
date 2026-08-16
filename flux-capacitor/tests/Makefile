@@ -6,11 +6,12 @@ DOCTEST_H   = doctest.h
 
 DAISYSP_SRC = ../../lib/Aurora-SDK/libs/DaisySP/Source/Control/phasor.cpp
 
-all: $(DOCTEST_H) test_warp_control test_tape_voice test_dsp_util test_mix_control
+all: $(DOCTEST_H) test_warp_control test_tape_voice test_dsp_util test_mix_control test_tape_transport
 	./test_warp_control
 	./test_tape_voice
 	./test_dsp_util
 	./test_mix_control
+	./test_tape_transport
 
 $(DOCTEST_H):
 	curl -sSL $(DOCTEST_URL) -o $@
@@ -27,5 +28,8 @@ test_dsp_util: test_dsp_util.cpp $(DOCTEST_H)
 test_mix_control: test_mix_control.cpp $(DOCTEST_H)
 	$(CXX) $(CXXFLAGS) -o $@ $<
 
+test_tape_transport: test_tape_transport.cpp $(DOCTEST_H)
+	$(CXX) $(CXXFLAGS) -o $@ $<
+
 clean:
-	rm -f test_warp_control test_tape_voice test_dsp_util test_mix_control $(DOCTEST_H)
+	rm -f test_warp_control test_tape_voice test_dsp_util test_mix_control test_tape_transport $(DOCTEST_H)
