@@ -11,10 +11,16 @@
  *  other MIX setting is untouched by FREEZE. LED_FREEZE tracks the
  *  tape-stop fade, briefly flashing white whenever MIX crosses into or
  *  out of that fully-dry auto-wet zone.
+ *  Phase 4 adds a stereo tape delay (KNOB_TIME/CV_TIME, log-mapped
+ *  1ms-2s) between the pitch stage and the MIX blend: repeats darken
+ *  via a fixed feedback lowpass, lengthen and slow as FREEZE brakes the
+ *  tape, and wobble in sync with the same wow/flutter signal already
+ *  applied to pitch.
  *  See docs/superpowers/specs/2026-08-15-flux-capacitor-phase1-pitch-bend-design.md,
  *  docs/superpowers/specs/2026-08-16-flux-capacitor-warp-led-feedback-design.md,
- *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase2-tape-stop-design.md, and
- *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase3-wow-flutter-design.md
+ *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase2-tape-stop-design.md,
+ *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase3-wow-flutter-design.md, and
+ *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase4-tape-delay-design.md
  */
 #include "aurora.h"
 #include "tape_voice.h"
@@ -23,6 +29,7 @@
 #include "mix_control.h"
 #include "wow_flutter.h"
 #include "dsp_util.h"
+#include "tape_delay.h"
 
 using namespace daisy;
 using namespace aurora;
@@ -41,6 +48,16 @@ float           mixSmoothCoeff     = 0.0f;
 float           stopRampCoeff      = 0.0f;
 float           reflectSmoothCoeff = 0.0f;
 float           blurSmoothCoeff    = 0.0f;
+
+// SDRAM-placed backing storage for TapeDelay -- see tape_delay.h's
+// class comment and the design spec's "Buffer sizing and memory
+// placement". DSY_SDRAM_BSS is already available here transitively via
+// aurora.h -> daisy_seed.h -> daisy.h -> dev/sdram.h; no new include
+// is needed.
+TapeDelayLine DSY_SDRAM_BSS delayLineL, delayLineR;
+TapeDelay     delayL, delayR;
+OnePoleSmoother timeSmoother;
+float           timeSmoothCoeff = 0.0f;
 
 // MIX dry-zone-crossing white flash on LED_FREEZE (see MixDryZoneCrossed).
 // prevMix/mixFlashBlocksRemaining are written in AudioCallback and read
@@ -82,6 +99,12 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
     float rawFlutterDepth = ComputeFlutterDepthSemitones(hw.GetKnobValue(KNOB_BLUR), hw.GetCvValue(CV_BLUR));
     float flutterDepth     = blurSmoother.Process(rawFlutterDepth, blurSmoothCoeff);
 
+    float rawDelaySeconds = ComputeDelayTimeSeconds(hw.GetKnobValue(KNOB_TIME), hw.GetCvValue(CV_TIME));
+    float delaySeconds     = timeSmoother.Process(rawDelaySeconds, timeSmoothCoeff);
+
+    delayL.Update(delaySeconds, speed);
+    delayR.Update(delaySeconds, speed);
+
     for (size_t i = 0; i < size; i++)
     {
         float wobble     = wowFlutter.Process(wowRateHz, flutterDepth);
@@ -89,6 +112,9 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 
         float wetL = voiceL.Process(in[0][i], totalSemis) * wetAmp;
         float wetR = voiceR.Process(in[1][i], totalSemis) * wetAmp;
+
+        wetL = delayL.Process(wetL, wobble);
+        wetR = delayR.Process(wetR, wobble);
 
         out[0][i] = in[0][i] * dryGain + wetL * wetGain;
         out[1][i] = in[1][i] * dryGain + wetR * wetGain;
@@ -117,12 +143,15 @@ int main(void)
     // Brief, fixed-duration white flash on LED_FREEZE when MIX crosses the
     // fully-dry auto-wet boundary -- not a fade, just a short blink.
     constexpr float kMixEdgeFlashSeconds = 0.15f;
+    constexpr float kTimeSmoothTimeSeconds = 0.08f; // slower than the other 0.02f smoothers --
+    // TIME's sweep is meant to audibly warble, not click; see the design spec.
     warpSmoothCoeff     = 1.0f / (kWarpSmoothTimeSeconds * hw.AudioCallbackRate());
     mixSmoothCoeff      = 1.0f / (kMixSmoothTimeSeconds * hw.AudioCallbackRate());
     stopRampCoeff       = 1.0f / (kStopRampTimeSeconds * hw.AudioCallbackRate());
     reflectSmoothCoeff  = 1.0f / (kReflectSmoothTimeSeconds * hw.AudioCallbackRate());
     blurSmoothCoeff     = 1.0f / (kBlurSmoothTimeSeconds * hw.AudioCallbackRate());
     mixFlashBlocksTotal = static_cast<int>(kMixEdgeFlashSeconds * hw.AudioCallbackRate());
+    timeSmoothCoeff     = 1.0f / (kTimeSmoothTimeSeconds * hw.AudioCallbackRate());
 
     voiceL.Init(hw.AudioSampleRate());
     voiceR.Init(hw.AudioSampleRate());
@@ -132,6 +161,9 @@ int main(void)
     mixSmoother.Init(0.0f);
     reflectSmoother.Init(kWowRateMinHz);
     blurSmoother.Init(0.0f);
+    delayL.Init(&delayLineL, hw.AudioSampleRate());
+    delayR.Init(&delayLineR, hw.AudioSampleRate());
+    timeSmoother.Init(0.0f);
 
     hw.StartAudio(AudioCallback);
 
