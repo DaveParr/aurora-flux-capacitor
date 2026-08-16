@@ -175,8 +175,28 @@ logic is needed here.
 ```cpp
 constexpr float kTapeDelayFeedback = 0.35f; // fixed; no control surface yet
 
-constexpr float kTapeDelayFeedbackLpfTauSeconds = 0.001f; // ~159 Hz -3dB point, audio-rate coeff
+constexpr float kTapeDelayFeedbackLpfTauSeconds = 0.00005f; // ~3.2 kHz -3dB point, audio-rate coeff
 ```
+
+**This tau value is load-bearing, not a rough "sounds tape-ish" guess.**
+A one-pole filter's response to a true single-sample impulse peaks at
+only `coeff` (`1/(tau*sample_rate)`) of the impulse's height, and takes
+roughly `1/coeff` samples to decay back toward zero — so a tau chosen
+too large relative to the delay time doesn't just "darken" each
+repeat, it visibly smears it across neighboring samples. Verified via
+a host-side scratch probe (same technique Phase 3 used for
+`kFlutterMakeupGain`): at TIME's minimum (1ms = 48 samples at 48kHz,
+the worst case since it's the shortest gap between repeats), an
+initially-considered `kTapeDelayFeedbackLpfTauSeconds = 0.001f` (~159
+Hz) spreads each repeat's energy across ~150 samples with no return to
+silence between taps — the delay reads as a diffuse wash even at a
+"tight slapback" TIME setting, contradicting this spec's own hardware
+acceptance criterion of "a short, tight slapback echo" at TIME
+minimum. `0.00005f` (~3.2 kHz) settles within about 10 samples at
+48kHz — comfortably inside even the shortest 48-sample gap, leaving
+audible silence between repeats — while still rolling off high-frequency
+content enough to read as tape-style darkening rather than a clean,
+untouched repeat.
 
 Aurora exposes six knobs, and by this phase all six have an assigned
 primary function (WARP, TIME, BLUR, REFLECT, MIX — ATMOSPHERE remains
