@@ -1,36 +1,60 @@
 /** flux-capacitor
  *
- *  Phase 1: WARP knob/CV pitch bend via a continuous, glitch-free tape
- *  voice pitch engine (no semitone stepping). True stereo. LED_1-6 show
- *  the current pitch shift as a symmetric bar-graph.
- *  See docs/superpowers/specs/2026-08-15-flux-capacitor-phase1-pitch-bend-design.md
- *  and docs/superpowers/specs/2026-08-16-flux-capacitor-warp-led-feedback-design.md
+ *  Phase 2: FREEZE-driven tape stop with a MIX dry/wet blend, layered
+ *  on top of Phase 1's WARP knob/CV pitch bend. True stereo. LED_1-6
+ *  show the WARP pitch shift as a bar-graph; LED_FREEZE tracks the
+ *  tape-stop fade.
+ *  See docs/superpowers/specs/2026-08-15-flux-capacitor-phase1-pitch-bend-design.md,
+ *  docs/superpowers/specs/2026-08-16-flux-capacitor-warp-led-feedback-design.md, and
+ *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase2-tape-stop-design.md
  */
 #include "aurora.h"
-#include "dsp_util.h"
 #include "tape_voice.h"
 #include "warp_control.h"
+#include "tape_transport.h"
+#include "mix_control.h"
+#include "dsp_util.h"
 
 using namespace daisy;
 using namespace aurora;
 using namespace fluxcap;
 
-Hardware     hw;
-TapeVoice    voiceL, voiceR;
+Hardware        hw;
+TapeVoice       voiceL, voiceR;
+TapeTransport   transport;
 OnePoleSmoother warpSmoother;
-float        warpSmoothCoeff = 0.0f;
+OnePoleSmoother mixSmoother;
+float           warpSmoothCoeff = 0.0f;
+float           mixSmoothCoeff  = 0.0f;
+float           stopRampCoeff   = 0.0f;
 
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
 {
     hw.ProcessAllControls();
 
-    float rawSemitones = ComputeWarpSemitones(hw.GetKnobValue(KNOB_WARP), hw.GetWarpVoct());
-    float semitones     = warpSmoother.Process(rawSemitones, warpSmoothCoeff);
+    float rawWarpSemis = ComputeWarpSemitones(hw.GetKnobValue(KNOB_WARP), hw.GetWarpVoct());
+    float warpSemis     = warpSmoother.Process(rawWarpSemis, warpSmoothCoeff);
+
+    bool freezeEdge = hw.GetButton(SW_FREEZE).RisingEdge();
+    bool gateHigh   = hw.GetGateState(GATE_FREEZE);
+    transport.Update(freezeEdge, gateHigh, stopRampCoeff);
+    float speed = transport.Speed();
+
+    float totalSemis = warpSemis + StopSemitones(speed);
+    float wetAmp      = StopAmplitude(speed);
+
+    float rawMix = ComputeMix(hw.GetKnobValue(KNOB_MIX), hw.GetCvValue(CV_MIX));
+    float mix     = mixSmoother.Process(rawMix, mixSmoothCoeff);
+    float dryGain, wetGain;
+    ComputeMixGains(mix, &dryGain, &wetGain);
 
     for (size_t i = 0; i < size; i++)
     {
-        out[0][i] = voiceL.Process(in[0][i], semitones);
-        out[1][i] = voiceR.Process(in[1][i], semitones);
+        float wetL = voiceL.Process(in[0][i], totalSemis) * wetAmp;
+        float wetR = voiceR.Process(in[1][i], totalSemis) * wetAmp;
+
+        out[0][i] = in[0][i] * dryGain + wetL * wetGain;
+        out[1][i] = in[1][i] * dryGain + wetR * wetGain;
     }
 }
 
@@ -40,20 +64,35 @@ int main(void)
     hw.ClearLeds();
     hw.WriteLeds();
 
-    // One-pole smoothing time constant for WARP knob/CV jitter damping
-    // (not pitch glide -- TapeVoice's crossfade mechanism handles that).
+    // One-pole smoothing time constants for control-rate jitter damping
+    // (not pitch/amplitude glide -- TapeVoice's crossfade and
+    // TapeTransport's own ramp handle those).
     constexpr float kWarpSmoothTimeSeconds = 0.02f;
+    constexpr float kMixSmoothTimeSeconds  = 0.02f;
+    // fonepole's "time" parameter is an exponential time constant (tau), not a
+    // fixed ramp duration -- see dsp.h's fonepole doc comment. TapeTransport
+    // snaps to its target once within kSnapEpsilon (0.001), which an
+    // exponential decay reaches at t = tau * ln(1/kSnapEpsilon) = tau * ln(1000).
+    // Solving for a ~1.5s settle time: tau = 1.5 / ln(1000) ~= 0.217s.
+    constexpr float kStopRampTimeSeconds   = 0.217f;
     warpSmoothCoeff = 1.0f / (kWarpSmoothTimeSeconds * hw.AudioCallbackRate());
+    mixSmoothCoeff  = 1.0f / (kMixSmoothTimeSeconds * hw.AudioCallbackRate());
+    stopRampCoeff   = 1.0f / (kStopRampTimeSeconds * hw.AudioCallbackRate());
 
     voiceL.Init(hw.AudioSampleRate());
     voiceR.Init(hw.AudioSampleRate());
+    transport.Init();
     warpSmoother.Init(0.0f);
+    mixSmoother.Init(0.0f);
 
     hw.StartAudio(AudioCallback);
 
     // WARP pitch-shift bar-graph: LED_4/5/6 light amber outward for an
     // upward shift, LED_3/2/1 light cyan outward for a downward shift.
+    // LED_FREEZE lights red, brightness tracking (1 - tape speed), so
+    // it's off in normal play and full-bright exactly when stopped.
     // See docs/superpowers/specs/2026-08-16-flux-capacitor-warp-led-feedback-design.md
+    // and docs/superpowers/specs/2026-08-16-flux-capacitor-phase2-tape-stop-design.md
     constexpr float kWarpUpColor[3]   = {1.0f, 0.4f, 0.0f}; // amber
     constexpr float kWarpDownColor[3] = {0.0f, 0.6f, 1.0f}; // cyan
     const Leds      upLeds[3]         = {LED_4, LED_5, LED_6};
@@ -74,6 +113,7 @@ int main(void)
                       kWarpDownColor[1] * levels.down[i],
                       kWarpDownColor[2] * levels.down[i]);
         }
+        hw.SetLed(LED_FREEZE, 1.0f - transport.Speed(), 0.0f, 0.0f);
         hw.WriteLeds();
     }
 }

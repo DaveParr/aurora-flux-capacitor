@@ -81,3 +81,18 @@ TEST_CASE("TapeTransport - releasing gate hands control back to button's last to
         transport.Update(false, false, 0.1f); // gate released, button target is PLAY
     CHECK(transport.Speed() == 1.0f);
 }
+
+TEST_CASE("TapeTransport - freeze edge during gated stop flips button target silently, revealed on gate release") {
+    TapeTransport transport;
+    transport.Init(); // button target == PLAY (1.0)
+
+    for (int i = 0; i < 200; i++)
+        transport.Update(false, true, 0.1f); // gate forces stop
+    CHECK(transport.Speed() == 0.0f);
+
+    transport.Update(/*freeze_edge=*/true, /*gate_high=*/true, 0.1f); // button target flips to STOP while gated
+
+    for (int i = 0; i < 200; i++)
+        transport.Update(false, false, 0.1f); // gate released; button target is now STOP
+    CHECK(transport.Speed() == 0.0f); // stays stopped, not back to PLAY
+}

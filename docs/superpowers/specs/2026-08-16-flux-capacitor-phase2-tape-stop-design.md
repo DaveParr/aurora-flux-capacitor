@@ -47,8 +47,10 @@ class TapeTransport
     // gate_high: current GATE_FREEZE level; forces target = 0 while true,
     //            overriding the button, and releases control back to the
     //            button's last toggle when it goes low. Unpatched gates
-    //            read low via GateIn's pulldown, so this is a no-op when
-    //            nothing is patched.
+    //            depend on the external inverting input circuit's idle
+    //            state (GateIn has no internal pull resistor), expected
+    //            to read as "not high", so this is a no-op when nothing
+    //            is patched.
     void Update(bool freeze_edge, bool gate_high, float ramp_coeff);
 
     float Speed() const;   // 0..1, current smoothed transport speed
@@ -60,11 +62,17 @@ class TapeTransport
 ```
 
 `ramp_coeff` is a single fixed constant tuned for roughly a 1.5 second
-stop/start ramp (same `1.0f / (seconds * hw.AudioCallbackRate())`
-pattern `main.cpp` already uses for `warpSmoothCoeff`). No knob
-controls ramp rate in this phase — TIME stays unused until Phase 4's
-delay, matching the parent doc's own phasing (Shift+TIME ramp-curve
-control is Phase 5 Polish).
+stop/start settle time (same `1.0f / (seconds * hw.AudioCallbackRate())`
+pattern `main.cpp` already uses for `warpSmoothCoeff`). Note that the
+`seconds` value in this formula is `fonepole`'s exponential time
+constant τ, not the settle duration itself — since `TapeTransport`
+snaps to its target once within `kSnapEpsilon` (0.001), the actual
+settle time is `τ · ln(1/kSnapEpsilon) ≈ τ · 6.9`, so implementers
+should size `seconds` accordingly (τ ≈ 0.217s for a ~1.5s settle), not
+plug the desired settle time in directly. No knob controls ramp rate in
+this phase — TIME stays unused until Phase 4's delay, matching the
+parent doc's own phasing (Shift+TIME ramp-curve control is Phase 5
+Polish).
 
 ### Speed → pitch and amplitude
 

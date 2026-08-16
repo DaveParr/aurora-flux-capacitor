@@ -51,8 +51,11 @@ class TapeTransport
      *  gate_high: current GATE_FREEZE level. Forces the target to 0
      *  while true, overriding the button; when it goes false, control
      *  reverts to the button's last toggled target. Unpatched gates
-     *  read low (GateIn's pulldown), so this is a no-op when nothing
-     *  is patched into GATE_FREEZE.
+     *  depend on the external inverting input circuit's idle state
+     *  (GateIn has no internal pull resistor -- see GateIn::Init in
+     *  libDaisy), which is expected to read as "not high" with nothing
+     *  patched, making this a no-op when nothing is patched into
+     *  GATE_FREEZE.
      *  ramp_coeff: one-pole coefficient (1.0f / (seconds * blockRate)).
      */
     void Update(bool freeze_edge, bool gate_high, float ramp_coeff)
