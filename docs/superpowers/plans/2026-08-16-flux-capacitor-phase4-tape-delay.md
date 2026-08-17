@@ -511,7 +511,7 @@ git add flux-capacitor/main.cpp
 git commit -m "flux-capacitor: wire TapeDelay and TIME control into main.cpp"
 ```
 
-- [ ] **Step 10: Hardware verification (manual, per the spec's acceptance criteria)**
+- [x] **Step 10: Hardware verification (manual, per the spec's acceptance criteria)** — passed 2026-08-17.
 
 Flash to the module (see the `run-aurora` skill for mount/flash steps) and check:
 - With TIME at minimum: a short, tight slapback echo. Sweeping TIME toward maximum smoothly lengthens the echo spacing up to a multi-second delay, log-curved.
