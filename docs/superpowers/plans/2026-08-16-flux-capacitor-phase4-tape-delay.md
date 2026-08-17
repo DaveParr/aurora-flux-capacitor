@@ -1,5 +1,7 @@
 # Flux Capacitor — Phase 4: Tape Delay Implementation Plan
 
+> **Post-implementation note:** This plan's code samples reflect the design as originally written and do not include two corrections made during review: (1) `ApplyWobbleToDelaySamples` divides by the wobble ratio, not multiplies; (2) `TapeDelay::Process` slew-limits the delay-line position and returns `in + wet`, not just `wet`. The design spec's "Wow/flutter coupling" and "`TapeDelay` class" sections have been updated to match. Trust `flux-capacitor/tape_delay.h` over this document's code blocks.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a stereo, wow/flutter-and-speed-coupled tape delay to the `flux-capacitor` firmware, sitting between the existing WARP/tape-stop/wow-flutter pitch stage (`TapeVoice`) and the MIX dry/wet blend — wiring up `KNOB_TIME`/`CV_TIME` for the first time.

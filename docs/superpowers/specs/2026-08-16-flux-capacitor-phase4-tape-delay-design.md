@@ -40,7 +40,11 @@ parent doc's pseudocode (`tapeDelay.Process(shifted, ...)`, where
 `shifted` is the pitch shifter's output). MIX continues to blend
 against the raw input exactly as today — `TapeDelay`'s output simply
 replaces `TapeVoice`'s output as the "wet" signal feeding
-`ComputeMixGains`. This is a stereo pair, `delayL`/`delayR`, mirroring
+`ComputeMixGains`. `TapeDelay::Process` returns its own input summed
+with the wet repeats (`in + wet`), not the repeats alone — otherwise
+the instantaneous pitch-shifted signal would vanish behind the echo
+bed whenever MIX is dialed toward fully wet, since MIX has no other
+path back to `TapeVoice`'s output. This is a stereo pair, `delayL`/`delayR`, mirroring
 `voiceL`/`voiceR`: each channel is an independent delay with its own
 feedback loop, not cross-coupled — the simplest option that preserves
 the existing stereo image, matching how `TapeVoice` already treats L/R
@@ -185,11 +189,48 @@ inline float ApplyWobbleToDelaySamples(float delay_samples, float wobble_semiton
 
 Called once per sample inside `TapeDelay::Process`, after `Update`'s
 control-rate target has already folded in TIME and speed. The result
-feeds `DelayLine::SetDelay` directly — `SetDelay(float)` already
-performs linear interpolation between adjacent samples (see
-`delayline.h`), the same fractional-delay mechanism `TapeVoice`
-already relies on for its own crossfaded taps, so no new interpolation
-logic is needed here.
+feeds `DelayLine::SetDelay`, but not directly — see "Delay-position
+slew limiting" below — which performs linear interpolation between
+adjacent samples (see `delayline.h`), the same fractional-delay
+mechanism `TapeVoice` already relies on for its own crossfaded taps,
+so no new interpolation logic is needed on top of that.
+
+### Delay-position slew limiting
+
+`ApplyWobbleToDelaySamples`'s ratio scales `target_samples_` as a
+whole, not a fixed offset. At TIME's long end (up to 96,000 samples)
+even a modest wobble ratio produces a per-sample position jump far
+larger than 1 sample — the read pointer would scrub backward through
+the buffer rather than nudge, which is broadband garbling, not tape
+flutter. The same unbounded-jump problem hits any abrupt change to
+`target_samples_`, including a fast TIME sweep or a FREEZE ramp
+altering `speed` mid-stream.
+
+`TapeDelay::Process` therefore tracks a separate `current_samples_`
+that chases the wobbled target by at most
+`kMaxDelaySlewSamplesPerSample` (0.5) per sample, and feeds
+`current_samples_` — not the raw wobbled target — to `SetDelay`:
+
+```cpp
+constexpr float kMaxDelaySlewSamplesPerSample = 0.5f;
+```
+
+0.5 is the largest bound that still guarantees the read position only
+ever moves forward (effective read rate stays in `[0.5, 1.5]`) — the
+actually-broken part of the finding. A tighter bound would track the
+direct signal's own wow/flutter wobble more closely, but pushes a full
+TIME min-to-max sweep's settle time well past what feels like a
+responsive knob; that finer-grained tuning is a musical judgment best
+made by ear during hardware verification (plan Step 10), not something
+to guess blind here.
+
+The very first sample a `TapeDelay` instance ever processes snaps
+`current_samples_` straight to the wobbled target instead of slewing
+into it — there is no prior position to protect, and slewing from an
+arbitrary zero baseline would make a large TIME already dialed in at
+power-up sweep audibly for seconds, and would smear every host test's
+"instant repeat" assertion (each test `Init`s, calls `Update` once,
+then `Process`es from a cold start).
 
 ## Feedback path
 
@@ -278,6 +319,8 @@ class TapeDelay
         feedback_lpf_.Init(0.0f);
         feedback_lpf_coeff_ = 1.0f / (kTapeDelayFeedbackLpfTauSeconds * sample_rate);
         target_samples_     = 0.0f;
+        current_samples_    = 0.0f;
+        started_            = false;
     }
 
     // base_seconds: TIME knob+CV, already control-rate smoothed by the
@@ -292,21 +335,42 @@ class TapeDelay
     // sample. Must be called once per audio sample.
     float Process(float in, float wobble_semitones)
     {
-        float samples = ApplyWobbleToDelaySamples(target_samples_, wobble_semitones);
-        delay_->SetDelay(samples);
+        float wobbled = ApplyWobbleToDelaySamples(target_samples_, wobble_semitones);
+        if (!started_)
+        {
+            // No prior position to protect on the very first sample --
+            // see "Delay-position slew limiting" above.
+            current_samples_ = wobbled;
+            started_         = true;
+        }
+        else
+        {
+            current_samples_ += daisysp::fclamp(wobbled - current_samples_,
+                                                 -kMaxDelaySlewSamplesPerSample,
+                                                  kMaxDelaySlewSamplesPerSample);
+        }
+        float clamped = daisysp::fclamp(current_samples_, 0.0f,
+                                         static_cast<float>(kTapeDelayMaxSamples - 1));
+        delay_->SetDelay(clamped);
 
         float wet      = delay_->Read();
         float filtered = feedback_lpf_.Process(wet, feedback_lpf_coeff_);
         delay_->Write(in + filtered * kTapeDelayFeedback);
 
-        return wet;
+        return in + wet;
     }
+
+    // Current (post-slew) delay position in samples, for testing the
+    // slew bound.
+    float CurrentDelaySamples() const { return current_samples_; }
 
   private:
     TapeDelayLine  *delay_ = nullptr;
     OnePoleSmoother feedback_lpf_; // audio-rate LPF, not a control smoother
     float           feedback_lpf_coeff_ = 0.0f;
     float           target_samples_      = 0.0f;
+    float           current_samples_     = 0.0f;
+    bool            started_             = false;
     float           sr_                  = 48000.0f;
 };
 ```

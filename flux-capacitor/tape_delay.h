@@ -26,6 +26,24 @@ constexpr float kTapeDelayFeedback = 0.35f; // fixed; no control surface yet
 // minimum -- a diffuse wash, not the tight slapback this phase wants.
 constexpr float kTapeDelayFeedbackLpfTauSeconds = 0.00005f;
 
+// Bounds how fast TapeDelay::Process is allowed to move the DelayLine's
+// read position, in samples of delay-length change per sample of audio.
+// Without this, ApplyWobbleToDelaySamples's ratio is applied to the
+// *entire* delay length, so at long delay times the absolute per-sample
+// change in position can hugely exceed 1 -- the read pointer moves
+// backwards through the buffer, which is broadband garbling, not
+// flutter. The same unbounded-rate problem also causes a reverse-scrub
+// on a TIME sweep or a FREEZE ramp, since both change Update()'s target
+// abruptly. 0.5 is the largest value that still guarantees the read
+// position only ever moves forward (effective read rate stays in
+// [0.5, 1.5]) -- the actually-broken part of the finding. A tighter
+// bound would track the direct signal's own ~0.45-semitone wow/flutter
+// wobble more closely, but pushes a full TIME min-to-max sweep's settle
+// time well past what feels like a responsive knob; that finer-grained
+// tuning is a musical judgment best made by ear during hardware
+// verification, not something to guess blind here.
+constexpr float kMaxDelaySlewSamplesPerSample = 0.5f;
+
 /** Maps KNOB_TIME (0..1) + CV_TIME (additive, same pattern as
  *  WARP/MIX/REFLECT/BLUR) to a base delay time in seconds, log-curved
  *  (like ComputeWowRateHz) so short slapback times and long ambient
@@ -95,6 +113,8 @@ class TapeDelay
         feedback_lpf_.Init(0.0f);
         feedback_lpf_coeff_ = 1.0f / (kTapeDelayFeedbackLpfTauSeconds * sample_rate);
         target_samples_     = 0.0f;
+        current_samples_    = 0.0f;
+        started_            = false;
     }
 
     // base_seconds: TIME knob+CV, already control-rate smoothed by the
@@ -109,21 +129,53 @@ class TapeDelay
     // sample. Must be called once per audio sample.
     float Process(float in, float wobble_semitones)
     {
-        float samples = ApplyWobbleToDelaySamples(target_samples_, wobble_semitones);
-        delay_->SetDelay(samples);
+        float wobbled = ApplyWobbleToDelaySamples(target_samples_, wobble_semitones);
+        if (!started_)
+        {
+            // The very first sample this instance ever processes has no
+            // prior position to defend against a discontinuous jump --
+            // unlike a TIME sweep, wobble cycle, or FREEZE ramp mid-
+            // stream, there's nothing playing yet to garble. Snapping
+            // here (once) mirrors TapeTransport::Init's
+            // speed_==button_target_ precedent: avoid manufacturing a
+            // slew from an arbitrary zero baseline before any real
+            // target has been requested. Without this, a fresh TapeDelay
+            // with a large TIME already dialed in (e.g. on module
+            // power-up) would sweep audibly for seconds before reaching
+            // it, and this project's regression tests -- which Init,
+            // Update once, then Process from a cold start -- would see
+            // every "instant repeat" test smeared by the same ramp.
+            current_samples_ = wobbled;
+            started_         = true;
+        }
+        else
+        {
+            current_samples_ += daisysp::fclamp(wobbled - current_samples_,
+                                                 -kMaxDelaySlewSamplesPerSample,
+                                                  kMaxDelaySlewSamplesPerSample);
+        }
+        float clamped = daisysp::fclamp(current_samples_, 0.0f,
+                                         static_cast<float>(kTapeDelayMaxSamples - 1));
+        delay_->SetDelay(clamped);
 
         float wet      = delay_->Read();
         float filtered = feedback_lpf_.Process(wet, feedback_lpf_coeff_);
         delay_->Write(in + filtered * kTapeDelayFeedback);
 
-        return wet;
+        return in + wet;
     }
+
+    // Current (post-slew) delay position in samples. Exposed for testing
+    // the slew bound in Fix 1's regression test below.
+    float CurrentDelaySamples() const { return current_samples_; }
 
   private:
     TapeDelayLine  *delay_ = nullptr;
     OnePoleSmoother feedback_lpf_; // audio-rate LPF, not a control smoother
     float           feedback_lpf_coeff_ = 0.0f;
     float           target_samples_      = 0.0f;
+    float           current_samples_     = 0.0f;
+    bool            started_             = false;
     float           sr_                  = 48000.0f;
 };
 } // namespace fluxcap

@@ -83,6 +83,30 @@ TEST_CASE("TapeDelay - impulse produces decaying, bounded repeats at the expecte
     CHECK(peaks[2] < peaks[1]);
     CHECK(peaks[3] < peaks[2]);
     CHECK(maxAbs == doctest::Approx(1.0f));      // never exceeds the original impulse
+
+    // Pins kTapeDelayFeedbackLpfTauSeconds against regressing to a
+    // slower value (e.g. the rejected 0.001f) that would smear repeats
+    // together instead of darkening them: at the correct tau, the
+    // second repeat's peak is ~14.6% of the first; at the rejected
+    // tau it would be ~0.7%. All the *ordering* assertions above this
+    // one pass at either tau, so without this the tau has zero
+    // regression coverage despite being documented load-bearing.
+    CHECK(peaks[1] > 0.05f);
+}
+
+TEST_CASE("TapeDelay - per-sample delay-position slew is bounded even for a huge target jump") {
+    TapeDelayLine line;
+    TapeDelay     delay;
+    delay.Init(&line, 48000.0f);
+    delay.Update(kDelayTimeMinSeconds, 1.0f); // tiny target
+    delay.Process(0.0f, 0.0f);                // settle near the tiny target
+    delay.Update(kDelayTimeMaxSeconds, 1.0f); // huge jump in target (~96000 samples)
+
+    float before = delay.CurrentDelaySamples();
+    delay.Process(0.0f, 0.0f);
+    float after = delay.CurrentDelaySamples();
+
+    CHECK(fabsf(after - before) <= kMaxDelaySlewSamplesPerSample + 1e-4f);
 }
 
 TEST_CASE("TapeDelay - lower speed lengthens the gap between repeats") {
