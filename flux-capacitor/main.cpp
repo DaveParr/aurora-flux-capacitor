@@ -16,11 +16,16 @@
  *  via a fixed feedback lowpass, lengthen and slow as FREEZE brakes the
  *  tape, and wobble in sync with the same wow/flutter signal already
  *  applied to pitch.
+ *  Phase 5a adds ATMOSPHERE (KNOB_ATMOSPHERE/CV_ATMOSPHERE) as a single
+ *  tape-coloration control: it darkens the wet signal (tone lowpass,
+ *  additionally darkened by tape-stop speed), adds tape-style
+ *  saturation, and raises TapeDelay's feedback amount, all together.
  *  See docs/superpowers/specs/2026-08-15-flux-capacitor-phase1-pitch-bend-design.md,
  *  docs/superpowers/specs/2026-08-16-flux-capacitor-warp-led-feedback-design.md,
  *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase2-tape-stop-design.md,
- *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase3-wow-flutter-design.md, and
- *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase4-tape-delay-design.md
+ *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase3-wow-flutter-design.md,
+ *  docs/superpowers/specs/2026-08-16-flux-capacitor-phase4-tape-delay-design.md, and
+ *  docs/superpowers/specs/2026-08-17-flux-capacitor-phase5-atmosphere-design.md
  */
 #include "aurora.h"
 #include "tape_voice.h"
@@ -30,6 +35,7 @@
 #include "wow_flutter.h"
 #include "dsp_util.h"
 #include "tape_delay.h"
+#include "atmosphere_control.h"
 
 using namespace daisy;
 using namespace aurora;
@@ -58,6 +64,9 @@ TapeDelayLine DSY_SDRAM_BSS delayLineL, delayLineR;
 TapeDelay     delayL, delayR;
 OnePoleSmoother timeSmoother;
 float           timeSmoothCoeff = 0.0f;
+OnePoleSmoother atmosphereSmoother;
+float           atmosphereSmoothCoeff = 0.0f;
+OnePoleSmoother atmosphereLpfL, atmosphereLpfR; // audio-rate tone filters, one per channel
 
 // MIX dry-zone-crossing white flash on LED_FREEZE (see MixDryZoneCrossed).
 // prevMix/mixFlashBlocksRemaining are written in AudioCallback and read
@@ -102,8 +111,13 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
     float rawDelaySeconds = ComputeDelayTimeSeconds(hw.GetKnobValue(KNOB_TIME), hw.GetCvValue(CV_TIME));
     float delaySeconds     = timeSmoother.Process(rawDelaySeconds, timeSmoothCoeff);
 
-    delayL.Update(delaySeconds, speed);
-    delayR.Update(delaySeconds, speed);
+    float rawAtmosphere = ComputeAtmosphereAmount(hw.GetKnobValue(KNOB_ATMOSPHERE), hw.GetCvValue(CV_ATMOSPHERE));
+    float atmosphere     = atmosphereSmoother.Process(rawAtmosphere, atmosphereSmoothCoeff);
+    float atmosphereLpfCoeff = ComputeAtmosphereLpfCoeff(atmosphere, speed, hw.AudioSampleRate());
+    float atmosphereDrive    = ComputeSaturationDrive(atmosphere);
+
+    delayL.Update(delaySeconds, speed, atmosphere);
+    delayR.Update(delaySeconds, speed, atmosphere);
 
     for (size_t i = 0; i < size; i++)
     {
@@ -120,6 +134,9 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 
         float wetL = voiceL.Process(in[0][i], totalSemis) * wetAmp;
         float wetR = voiceR.Process(in[1][i], totalSemis) * wetAmp;
+
+        wetL = atmosphereLpfL.Process(ApplySaturation(wetL, atmosphereDrive), atmosphereLpfCoeff);
+        wetR = atmosphereLpfR.Process(ApplySaturation(wetR, atmosphereDrive), atmosphereLpfCoeff);
 
         wetL = delayL.Process(wetL, wobble);
         wetR = delayR.Process(wetR, wobble);
@@ -153,6 +170,9 @@ int main(void)
     constexpr float kMixEdgeFlashSeconds = 0.15f;
     constexpr float kTimeSmoothTimeSeconds = 0.08f; // slower than the other 0.02f smoothers --
     // TIME's sweep is meant to audibly warble, not click; see the design spec.
+    constexpr float kAtmosphereSmoothTimeSeconds = 0.02f; // same as WARP/MIX/REFLECT/BLUR --
+    // unlike TIME, a fast ATMOSPHERE turn isn't meant to read as
+    // intentional analog character, so it should just track cleanly.
     warpSmoothCoeff     = 1.0f / (kWarpSmoothTimeSeconds * hw.AudioCallbackRate());
     mixSmoothCoeff      = 1.0f / (kMixSmoothTimeSeconds * hw.AudioCallbackRate());
     stopRampCoeff       = 1.0f / (kStopRampTimeSeconds * hw.AudioCallbackRate());
@@ -160,6 +180,7 @@ int main(void)
     blurSmoothCoeff     = 1.0f / (kBlurSmoothTimeSeconds * hw.AudioCallbackRate());
     mixFlashBlocksTotal = static_cast<int>(kMixEdgeFlashSeconds * hw.AudioCallbackRate());
     timeSmoothCoeff     = 1.0f / (kTimeSmoothTimeSeconds * hw.AudioCallbackRate());
+    atmosphereSmoothCoeff = 1.0f / (kAtmosphereSmoothTimeSeconds * hw.AudioCallbackRate());
 
     voiceL.Init(hw.AudioSampleRate());
     voiceR.Init(hw.AudioSampleRate());
@@ -172,6 +193,9 @@ int main(void)
     delayL.Init(&delayLineL, hw.AudioSampleRate());
     delayR.Init(&delayLineR, hw.AudioSampleRate());
     timeSmoother.Init(0.0f);
+    atmosphereSmoother.Init(0.0f);
+    atmosphereLpfL.Init(0.0f);
+    atmosphereLpfR.Init(0.0f);
 
     hw.StartAudio(AudioCallback);
 
