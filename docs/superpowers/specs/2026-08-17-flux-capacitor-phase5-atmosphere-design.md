@@ -96,7 +96,27 @@ formula:
 // Tau range for the ATMOSPHERE-driven tone lowpass. Provisional --
 // the later tuning-pass sub-project is expected to revisit these by
 // ear once the full coloration chain exists to audition against.
-constexpr float kAtmosphereLpfTauMinSeconds = 0.000005f; // near-bypass (~32 kHz), atmosphere = 0
+//
+// kAtmosphereLpfTauMinSeconds is a stability floor, not just a taste
+// choice: OnePoleSmoother's fonepole backing (out += coeff*(in-out))
+// is only a valid lowpass for coeff in (0, 1] -- coeff > 2 diverges
+// outright, and 1 < coeff < 2 is stable but resonant, not a lowpass.
+// Since coeff = 1/(tau*sample_rate), tau must never fall below one
+// sample period at the *fastest* sample rate this runs at (48kHz on
+// Aurora); 0.0000210f gives coeff ~= 0.992 at 48kHz, just inside the
+// valid range with a small margin. An earlier value (0.000005f, chosen
+// from the continuous-time cutoff formula 1/(2*pi*tau) alone without
+// checking it against fonepole's discrete-time stability bound) gave
+// coeff ~= 4.17 -- unconditionally divergent, driving the filter to
+// NaN within milliseconds regardless of where the ATMOSPHERE knob sat,
+// since atmosphereSmoother ramps up from 0.0f at power-on and sweeps
+// through the unstable region on every boot. Caught in the final
+// whole-branch review, not by any single task's tests, because the
+// bug only appears when the pure formula, the real 48kHz sample rate,
+// and fonepole's actual recurrence are considered together.
+// ComputeAtmosphereLpfCoeff's fmin(1.0f, ...) clamp below is a second,
+// independent line of defense against the same class of bug.
+constexpr float kAtmosphereLpfTauMinSeconds = 0.0000210f; // near-bypass (coeff ~= 0.99 at 48kHz), atmosphere = 0
 constexpr float kAtmosphereLpfTauMaxSeconds = 0.0001f;   // dark (~1.6 kHz), atmosphere = 1
 
 // Tau floor applied as speed -> 0, independent of the ATMOSPHERE knob
@@ -116,7 +136,10 @@ inline float ComputeAtmosphereLpfCoeff(float atmosphere, float speed, float samp
     float speedTau = daisysp::fmap(1.0f - daisysp::fclamp(speed, 0.0f, 1.0f),
                                     kAtmosphereLpfTauMinSeconds, kStopLpfTauSeconds);
     float tau = daisysp::fmax(atmosphereTau, speedTau); // larger tau = darker; take whichever is darker
-    return 1.0f / (tau * sample_rate);
+    // Defensive clamp: guarantees a valid fonepole coefficient (<=1.0)
+    // regardless of the tau constants above, at any sample rate this
+    // ever runs at -- see the stability-floor comment above.
+    return daisysp::fmin(1.0f, 1.0f / (tau * sample_rate));
 }
 ```
 
@@ -138,7 +161,17 @@ applies here: the coefficient must be computed against
 dependency tree — no new library code:
 
 ```cpp
-constexpr float kSaturationDriveMin = 1.0f; // atmosphere = 0: SoftClip(x) is ~identity for |x| << 1, effectively clean
+// kSaturationDriveMin = 1.0f is a deliberate compromise, not a fully
+// "clean" bypass: SoftClip's soft knee starts compressing well below
+// unity (SoftLimit(1.0) ~= 0.778, a full-scale peak ~-2.2dB with a few
+// percent third-harmonic), so there is no drive value that is
+// simultaneously unity-gain AND distortion-free at typical signal
+// levels -- lowering drive avoids the distortion but loses gain
+// instead (e.g. drive=0.25 keeps compression under ~0.2dB but quiets
+// the signal by ~12dB). 1.0f keeps unity gain and accepts the small,
+// provisional softening; true zero-effect transparency at atmosphere=0
+// (e.g. via a dry/wet blend of this stage) is left to the tuning pass.
+constexpr float kSaturationDriveMin = 1.0f;
 constexpr float kSaturationDriveMax = 4.0f; // atmosphere = 1: audible soft-knee saturation on typical signal levels
 
 inline float ComputeSaturationDrive(float atmosphere)
@@ -164,7 +197,12 @@ explicit speed input.
 
 ```cpp
 // Replaces the fixed kTapeDelayFeedback = 0.35f left in place by Phase 4.
-constexpr float kAtmosphereFeedbackMin = 0.15f;
+// kAtmosphereFeedbackMin matches that old constant exactly, so ATMOSPHERE
+// fully counterclockwise reproduces Phase 4's feedback behavior byte-for-
+// byte -- unlike saturation (see ApplySaturation's doc comment above),
+// this one dimension of "no change at zero" is fully achievable, so it
+// is, rather than leaving an unnecessary gap alongside the necessary one.
+constexpr float kAtmosphereFeedbackMin = 0.35f;
 constexpr float kAtmosphereFeedbackMax = 0.55f; // stays comfortably under 1.0; SoftClip in the loop bounds it further
 
 inline float ComputeAtmosphereFeedback(float atmosphere)
@@ -298,9 +336,19 @@ feedback-loop changes:
 
 Hardware verification (acceptance criteria for this sub-project):
 
-- With ATMOSPHERE fully counterclockwise: the signal path sounds
-  effectively as it did before this phase — no audible darkening,
-  saturation, or feedback-level change versus Phase 4's baseline.
+- With ATMOSPHERE fully counterclockwise: `TapeDelay`'s feedback amount
+  matches Phase 4's old fixed constant exactly (`kAtmosphereFeedbackMin
+  = 0.35f`), so repeat count/decay is unchanged from the Phase 4
+  baseline. Saturation is **not** bit-identical to a bypass at this
+  setting: `SoftClip`'s soft knee has no drive value that is
+  simultaneously unity-gain and distortion-free at typical signal
+  levels (`kSaturationDriveMin = 1.0f` gives a full-scale peak roughly
+  −2.2 dB with a few percent third-harmonic; a lower drive avoids the
+  distortion but loses gain instead). Expect subtle softening on hot
+  peaks, not silence-identical bypass — full transparency at this
+  setting (e.g. via a dry/wet blend of the saturation stage) is
+  deferred to the tuning pass, which can judge by ear whether it's
+  worth the added complexity.
 - Turning ATMOSPHERE clockwise smoothly and audibly darkens and warms
   the wet signal (both the direct pitch-shifted signal and the delay
   repeats), with increasing saturation character, and the delay's
