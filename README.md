@@ -1,112 +1,83 @@
-# Aurora Firmware Template
+# Flux Capacitor
 
-A minimal, ready-to-fork starting point for writing your own firmware for the [Qu-Bit Aurora](https://www.qubitelectronix.com/shop/aurora) eurorack module.
+Continuous-pitch tape voice firmware for the [Qu-Bit Aurora](https://www.qubitelectronix.com/shop/aurora) Eurorack module.
 
-## What's included
+## Features
 
-| Path | Purpose |
-|------|---------|
-| `flux-capacitor/` | WARP-controlled continuous-pitch tape-style voice firmware |
-| `lib/Aurora-SDK` | Git submodule — Aurora BSP, libDaisy, DaisySP |
-| `config.mk` | Shared toolchain and SDK path config |
-| `Makefile` | Top-level `build` / `flash` / `libdaisy` targets |
+Flux Capacitor turns the Aurora into a tape-style pitch and delay machine. WARP bends pitch continuously (no steps), FREEZE brakes the "tape" to a stop and back, REFLECT/BLUR add wow and flutter drift, and TIME layers a tape-style delay on top — all four coupled together the way a real tape machine's speed affects everything at once.
 
-### flux-capacitor
+- **Continuous pitch bend** — WARP knob (±12 semitones) plus WARP CV (1V/oct) bend pitch smoothly, with no audible stepping; centering WARP snaps to a bit-exact dry passthrough
+- **Tape stop/start** — FREEZE toggles a speed ramp from full speed to a full stop and back (~1.5s), dragging pitch and delay time down together as the tape "brakes"; GATE_FREEZE holds the stop for as long as the gate is high
+- **Wow and flutter** — REFLECT sets a slow sine wow rate (0.1–2 Hz), BLUR sets fast filtered-noise flutter depth; both modulate pitch and, more subtly, the delay's tap position for authentic drift
+- **Tape-style delay** — TIME (plus CV) sets delay time from 1 ms to 2 s, log-curved so short slapback and long ambient tails both feel like even steps; repeats darken via a fixed feedback lowpass and lengthen/slow as FREEZE brakes the tape
+- **Dry/wet blend with auto-rescue** — MIX blends dry and wet with an equal-power crossfade; if MIX is left fully dry, FREEZE automatically goes full-wet while actively stopping/starting so the effect is still audible, and reverts once you're back at speed
+- **WARP LED bar-graph** — LED_1–6 show pitch-shift direction and amount as an outward-growing bar (amber up, cyan down), breathing brightness with the wow/flutter amount; centered WARP shows a smooth cyan-to-amber gradient across all six instead
+- **FREEZE LED tape-speed meter** — LED_FREEZE glows red in proportion to how far the tape has slowed, and flashes white briefly whenever MIX crosses in or out of the fully-dry auto-wet zone
 
-The `flux-capacitor/tests/` directory has host-side unit tests covering the project's pure-logic headers (control mapping, DSP utilities, tape transport, and voice processing), built and run with plain `g++` and [doctest](https://github.com/doctest/doctest).
+**Not yet implemented:** ATMOSPHERE (knob and CV), REVERSE, and SHIFT are wired in hardware but have no effect on the sound yet.
 
-## Getting started
+## Download
 
-### 1. Create your repository from this template
+Pre-built firmware is available on the [Releases page](https://github.com/DaveParr/aurora-flux-capacitor/releases).
 
-**Option A — GitHub UI:** Click **"Use this template"** → **"Create a new repository"** on the repo page. Give it a name and finish the wizard. GitHub creates the remote repository; nothing is cloned yet.
+1. Download `flux-capacitor-<version>.bin` from the latest release
+2. Copy it to the root of a FAT32 USB drive (it must be the only `.bin` file there)
+3. Insert the USB drive into the Aurora module
+4. Power up the module with the drive inserted — the bootloader loads the firmware automatically
+5. Power down and remove the drive; check `daisy_boot_log.txt` on the drive to confirm a successful flash
 
-**Option B — GitHub CLI:**
+## Controls and Behaviour
 
-```sh
-gh repo create YOUR_REPO --template OWNER/aurora --public --clone=false
-```
+### Knobs
 
-Once the remote exists, clone it **with submodules**:
+| Knob | Function |
+|------|----------|
+| Warp | Pitch bend, ±12 semitones. Centered = dry passthrough (a small deadzone snaps near-center readings to exactly 0) |
+| Time | Delay time, log-mapped from 1 ms to 2 s |
+| Reflect | Wow rate — LFO frequency from 0.1 Hz to 2 Hz, log-curved. Wow depth itself is fixed |
+| Blur | Flutter depth, linear from none to full jitter |
+| Mix | Dry/wet balance, equal-power crossfade |
+| Atmosphere | Unused |
 
-```sh
-git clone --recurse-submodules https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO
-```
+### Buttons
 
-If you forgot `--recurse-submodules`:
+| Button | Function |
+|--------|----------|
+| Freeze | Toggle tape stop/start — press once to brake to a stop, press again to spin back up to speed (~1.5s ramp either way) |
+| Reverse | Unused |
+| Shift | Unused |
 
-```sh
-git submodule update --init --recursive
-```
+### Gate/CV Inputs
 
-A suggested name convention would be 'Aurora-*'.
+| Input | Function |
+|-------|----------|
+| Freeze gate | While high, forces the tape to a stop regardless of the button's last state; releasing the gate returns control to the button |
+| Reverse gate | Unused |
+| Warp CV | 1V/oct pitch control, added to the Warp knob's semitone offset |
+| Time CV | Added to the Time knob (delay time) |
+| Reflect CV | Added to the Reflect knob (wow rate) |
+| Blur CV | Added to the Blur knob (flutter depth) |
+| Mix CV | Added to the Mix knob (dry/wet) |
+| Atmosphere CV | Unused |
 
-### 2. Install the ARM toolchain
+Each knob/CV pair sums and clamps to its parameter's valid range: the knob sets the center, CV swings the parameter around it.
 
-The build uses `gcc-arm-none-eabi`. The default path in `config.mk` is:
+### Audio
 
-```
-~/.local/share/gcc-arm-none-eabi/gcc-arm-none-eabi-10-2020-q4-major/bin
-```
+Signal path: pitch shift (Warp + tape speed + wow/flutter) → tape delay (Time, speed- and wobble-coupled) → dry/wet blend (Mix) → output. True stereo throughout.
 
-You can install the toolchain there, or override the path at build time:
+Pressing Freeze ramps the tape speed from 1.0 to 0.0 (or back) over about 1.5 seconds. As speed falls, pitch drops an octave for every halving of speed, the delay's repeats lengthen and slow in lockstep, and the wet signal's amplitude fades with speed — a full stop is silence, not a frozen loudness. If Mix is dialed fully dry, Freeze temporarily overrides it to fully wet for the duration of the stop/start so the effect is actually audible, then hands control back to your Mix setting once play resumes; any other Mix setting is left alone throughout.
 
-```sh
-make build PROJECT=flux-capacitor GCC_PATH=/path/to/your/arm-gcc/bin
-```
+Wow (slow, Reflect-controlled) and flutter (fast, Blur-controlled) sum into the same pitch signal Warp and tape-stop use, and separately nudge the delay's read position — so pitch and delay drift together, the way a real tape's speed instability would affect both.
 
-The [Aurora-SDK README](lib/Aurora-SDK/README.md) has OS-specific toolchain installation instructions for Windows, macOS, and Linux.
+### LEDs
 
-### 3. Build libDaisy (one-time)
-
-```sh
-make libdaisy
-```
-
-This compiles the libDaisy static library from source inside the submodule. Only needed once, or after updating the submodule.
-
-
-
-### 4. Run the unit tests
-
-The tests compile and run on your host machine (no hardware needed):
-
-```sh
-cd flux-capacitor/tests
-make
-```
-
-### 5. Build and flash flux-capacitor
-
-```sh
-# Build
-make build PROJECT=flux-capacitor
-
-# Copy .bin to USB drive (adjust MOUNT to where your USB drive is mounted)
-make flash PROJECT=flux-capacitor MOUNT=/media/YOUR_USER/YOUR_DRIVE
-```
-
-Then:
-1. Eject the USB drive from your computer
-2. Insert it into the Aurora module
-3. Power up the Aurora with the USB drive inserted — the bootloader loads the firmware at boot
-
-**Verify it loaded:** power down, re-insert the USB drive into your computer, and check `daisy_boot_log.txt`. The newest entry should read:
-
-```
-N. Successfully flashed file "flux-capacitor.bin" to address 0x90040000
-```
-
-If the entry is missing or shows an error, check that `flux-capacitor.bin` is the only `.bin` file in the root of the drive.
-
-## Starting your own project
-
-From there the world is yours! Start writing code and show us what you got!
-
-## Hardware reference
-
-See [context.md](context.md) for notes on physical LED positions, knob layout, button names, and bottom-LED hardware constraints that aren't obvious from the SDK headers.
+| LED | Behaviour |
+|-----|-----------|
+| Arc (1–6) | WARP pitch-shift bar-graph: LED_4/5/6 light amber outward for an upward shift, LED_3/2/1 light cyan outward for a downward shift. Brightness breathes with the wow/flutter amount. When Warp is centered, all six instead show a smooth cyan-to-amber gradient across the arc, crossfading into the bar-graph as the knob leaves center. |
+| Freeze LED | Glows red, brightness proportional to how far the tape has slowed (fully off at full speed, full red at a dead stop). Briefly flashes white whenever Mix crosses into or out of the fully-dry zone that triggers Freeze's auto-wet override. |
+| Reverse LED | Unused. |
+| Bottom LEDs | Unused. |
 
 ## License
 
