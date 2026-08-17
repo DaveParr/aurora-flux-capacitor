@@ -13,8 +13,9 @@ Flux Capacitor turns the Aurora into a tape-style pitch and delay machine. WARP 
 - **Dry/wet blend with auto-rescue** — MIX blends dry and wet with an equal-power crossfade; if MIX is left fully dry, FREEZE automatically goes full-wet while actively stopping/starting so the effect is still audible, and reverts once you're back at speed
 - **WARP LED bar-graph** — LED_1–6 show pitch-shift direction and amount as an outward-growing bar (amber up, cyan down), breathing brightness with the wow/flutter amount; centered WARP shows a smooth cyan-to-amber gradient across all six instead
 - **FREEZE LED tape-speed meter** — LED_FREEZE glows red in proportion to how far the tape has slowed, and flashes white briefly whenever MIX crosses in or out of the fully-dry auto-wet zone
+- **Tape coloration** — ATMOSPHERE (plus CV) darkens the wet signal's tone, adds soft-knee saturation, and raises the delay's feedback amount, all from one knob; past about noon the delay starts to feed back on itself pleasantly, sustaining rather than decaying, without ever spiraling out of control
 
-**Not yet implemented:** ATMOSPHERE (knob and CV), REVERSE, and SHIFT are wired in hardware but have no effect on the sound yet.
+**Not yet implemented:** REVERSE and SHIFT are wired in hardware but have no effect on the sound yet.
 
 ## Download
 
@@ -37,7 +38,7 @@ Pre-built firmware is available on the [Releases page](https://github.com/DavePa
 | Reflect | Wow rate — LFO frequency from 0.1 Hz to 2 Hz, log-curved. Wow depth itself is fixed |
 | Blur | Flutter depth, linear from none to full jitter |
 | Mix | Dry/wet balance, equal-power crossfade |
-| Atmosphere | Unused |
+| Atmosphere | Tape coloration — darkens tone, adds saturation, and raises delay feedback together, from clean-ish to warm and self-sustaining |
 
 ### Buttons
 
@@ -58,17 +59,19 @@ Pre-built firmware is available on the [Releases page](https://github.com/DavePa
 | Reflect CV | Added to the Reflect knob (wow rate) |
 | Blur CV | Added to the Blur knob (flutter depth) |
 | Mix CV | Added to the Mix knob (dry/wet) |
-| Atmosphere CV | Unused |
+| Atmosphere CV | Added to the Atmosphere knob (tape coloration) |
 
 Each knob/CV pair sums and clamps to its parameter's valid range: the knob sets the center, CV swings the parameter around it.
 
 ### Audio
 
-Signal path: pitch shift (Warp + tape speed + wow/flutter) → tape delay (Time, speed- and wobble-coupled) → dry/wet blend (Mix) → output. True stereo throughout.
+Signal path: pitch shift (Warp + tape speed + wow/flutter) → tape coloration (Atmosphere: saturation then tone lowpass) → tape delay (Time, speed- and wobble-coupled, with its own Atmosphere-driven feedback amount and feedback-loop saturation) → dry/wet blend (Mix) → output. True stereo throughout.
 
 Pressing Freeze ramps the tape speed from 1.0 to 0.0 (or back) over about 1.5 seconds. As speed falls, pitch drops an octave for every halving of speed, the delay's repeats lengthen and slow in lockstep, and the wet signal's amplitude fades with speed — a full stop is silence, not a frozen loudness. If Mix is dialed fully dry, Freeze temporarily overrides it to fully wet for the duration of the stop/start so the effect is actually audible, then hands control back to your Mix setting once play resumes; any other Mix setting is left alone throughout.
 
 Wow (slow, Reflect-controlled) and flutter (fast, Blur-controlled) sum into the same pitch signal Warp and tape-stop use, and separately nudge the delay's read position — so pitch and delay drift together, the way a real tape's speed instability would affect both.
+
+Atmosphere is one knob driving three things at once: a lowpass that darkens the wet signal (more so as Atmosphere increases, and further still as Freeze brakes the tape, even with Atmosphere fully off), soft-knee saturation on the wet signal and inside the delay's feedback loop, and the delay's feedback amount itself. Past about noon it starts to feed back on itself pleasantly — repeats sustain rather than decay, without ever spiraling out of control.
 
 ### LEDs
 
