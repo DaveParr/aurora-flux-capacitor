@@ -114,6 +114,8 @@ class TapeDelay
         target_samples_     = 0.0f;
         current_samples_    = 0.0f;
         started_            = false;
+        drive_              = 0.0f;
+        feedback_amount_    = 0.0f;
     }
 
     // base_seconds/speed: as before. atmosphere: smoothed ATMOSPHERE

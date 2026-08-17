@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 #include "../atmosphere_control.h"
+#include "../tape_transport.h"
 #include <cmath>
 
 using namespace fluxcap;
@@ -46,6 +47,18 @@ TEST_CASE("ComputeAtmosphereLpfCoeff - higher atmosphere never brightens (coeff 
         float coeff = ComputeAtmosphereLpfCoeff(a, 1.0f, 48000.0f);
         CHECK(coeff <= prevCoeff);
         prevCoeff = coeff;
+    }
+}
+
+TEST_CASE("ComputeAtmosphereLpfCoeff - coefficient never exceeds fonepole's stable range at any supported sample rate") {
+    for (float sample_rate : {48000.0f, 96000.0f}) {
+        for (float a = 0.0f; a <= 1.0f; a += 0.1f) {
+            for (float speed : {0.0f, kMinStopSpeed, 0.5f, 1.0f}) {
+                float coeff = ComputeAtmosphereLpfCoeff(a, speed, sample_rate);
+                CHECK(coeff <= 1.0f);
+                CHECK(coeff > 0.0f);
+            }
+        }
     }
 }
 

@@ -86,9 +86,9 @@ TEST_CASE("TapeDelay - impulse produces decaying, bounded repeats at the expecte
     CHECK(maxAbs == doctest::Approx(1.0f));      // never exceeds the original impulse
 
     // Pins kTapeDelayFeedbackLpfTauSeconds against regressing to a
-    // slower value: at the correct tau and atmosphere=0 (feedback=0.15,
-    // drive=1.0), the second repeat's peak is ~4.9% of the first; at a
-    // rejected slower tau it would be ~0.24% -- still a >20x margin, so
+    // slower value: at the correct tau and atmosphere=0 (feedback=0.35,
+    // drive=1.0), the second repeat's peak is ~11.3% of the first; at a
+    // rejected slower tau it would be ~0.57% -- still a >19x margin, so
     // 0.02f cleanly separates the two.
     CHECK(peaks[1] > 0.02f);
 }
@@ -221,4 +221,15 @@ TEST_CASE("TapeDelay - output stays bounded across many repeats even at maximum 
     // under the original impulse -- 1.05 gives headroom over the
     // observed ~1.0 ceiling without loosening the check to meaninglessness.
     CHECK(maxAbs <= 1.05f);
+}
+
+TEST_CASE("TapeDelay - atmosphere's feedback-amount and saturation-drive effects are independently verifiable") {
+    // At atmosphere=0, feedback amount is at its floor (kAtmosphereFeedbackMin)
+    // independent of drive, and drive is at its own floor (kSaturationDriveMin)
+    // independent of feedback -- these are two separate knobs on the same
+    // input, not one combined effect.
+    CHECK(ComputeAtmosphereFeedback(0.0f) == doctest::Approx(kAtmosphereFeedbackMin));
+    CHECK(ComputeSaturationDrive(0.0f) == doctest::Approx(kSaturationDriveMin));
+    CHECK(ComputeAtmosphereFeedback(1.0f) == doctest::Approx(kAtmosphereFeedbackMax));
+    CHECK(ComputeSaturationDrive(1.0f) == doctest::Approx(kSaturationDriveMax));
 }
