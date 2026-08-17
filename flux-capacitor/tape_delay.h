@@ -5,6 +5,7 @@
 #include "Utility/delayline.h"
 #include "tape_transport.h"
 #include "dsp_util.h"
+#include "atmosphere_control.h"
 
 namespace fluxcap
 {
@@ -14,8 +15,6 @@ constexpr float kDelayTimeMaxSeconds = 2.0f;
 // 2 seconds at a nominal 48kHz -- TapeVoice's DelayLine sizing precedent
 // (fixed compile-time constant, not derived from hw.AudioSampleRate()).
 constexpr size_t kTapeDelayMaxSamples = 96000;
-
-constexpr float kTapeDelayFeedback = 0.35f; // fixed; no control surface yet
 
 // ~3.2 kHz -3dB point. Verified empirically (host-side probe) to settle
 // within ~10 samples at 48kHz -- comfortably inside even TIME's shortest
@@ -117,11 +116,14 @@ class TapeDelay
         started_            = false;
     }
 
-    // base_seconds: TIME knob+CV, already control-rate smoothed by the
-    // caller. speed: TapeTransport::Speed(). Called once per audio block.
-    void Update(float base_seconds, float speed)
+    // base_seconds/speed: as before. atmosphere: smoothed ATMOSPHERE
+    // amount, same value driving the main-path tone/saturation this
+    // block. Called once per audio block.
+    void Update(float base_seconds, float speed, float atmosphere)
     {
-        target_samples_ = ComputeDelaySamples(base_seconds, speed, sr_);
+        target_samples_  = ComputeDelaySamples(base_seconds, speed, sr_);
+        drive_           = ComputeSaturationDrive(atmosphere);
+        feedback_amount_ = ComputeAtmosphereFeedback(atmosphere);
     }
 
     // wobble_semitones: WowFlutter::Process's return value for this
@@ -158,9 +160,10 @@ class TapeDelay
                                          static_cast<float>(kTapeDelayMaxSamples - 1));
         delay_->SetDelay(clamped);
 
-        float wet      = delay_->Read();
-        float filtered = feedback_lpf_.Process(wet, feedback_lpf_coeff_);
-        delay_->Write(in + filtered * kTapeDelayFeedback);
+        float wet       = delay_->Read();
+        float saturated = ApplySaturation(wet, drive_);
+        float filtered  = feedback_lpf_.Process(saturated, feedback_lpf_coeff_);
+        delay_->Write(in + filtered * feedback_amount_);
 
         return in + wet;
     }
@@ -177,5 +180,7 @@ class TapeDelay
     float           current_samples_     = 0.0f;
     bool            started_             = false;
     float           sr_                  = 48000.0f;
+    float           drive_               = 0.0f;
+    float           feedback_amount_     = 0.0f;
 };
 } // namespace fluxcap

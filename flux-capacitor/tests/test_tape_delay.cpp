@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 #include "../tape_delay.h"
+#include "../atmosphere_control.h"
 #include <cmath>
 
 using namespace fluxcap;
@@ -58,7 +59,7 @@ TEST_CASE("TapeDelay - impulse produces decaying, bounded repeats at the expecte
     TapeDelayLine line;
     TapeDelay     delay;
     delay.Init(&line, 48000.0f);
-    delay.Update(100.0f / 48000.0f, 1.0f); // target 100 samples
+    delay.Update(100.0f / 48000.0f, 1.0f, 0.0f); // target 100 samples, atmosphere off
 
     float peaks[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     int   repeat   = 0;
@@ -85,22 +86,20 @@ TEST_CASE("TapeDelay - impulse produces decaying, bounded repeats at the expecte
     CHECK(maxAbs == doctest::Approx(1.0f));      // never exceeds the original impulse
 
     // Pins kTapeDelayFeedbackLpfTauSeconds against regressing to a
-    // slower value (e.g. the rejected 0.001f) that would smear repeats
-    // together instead of darkening them: at the correct tau, the
-    // second repeat's peak is ~14.6% of the first; at the rejected
-    // tau it would be ~0.7%. All the *ordering* assertions above this
-    // one pass at either tau, so without this the tau has zero
-    // regression coverage despite being documented load-bearing.
-    CHECK(peaks[1] > 0.05f);
+    // slower value: at the correct tau and atmosphere=0 (feedback=0.15,
+    // drive=1.0), the second repeat's peak is ~4.9% of the first; at a
+    // rejected slower tau it would be ~0.24% -- still a >20x margin, so
+    // 0.02f cleanly separates the two.
+    CHECK(peaks[1] > 0.02f);
 }
 
 TEST_CASE("TapeDelay - per-sample delay-position slew is bounded even for a huge target jump") {
     TapeDelayLine line;
     TapeDelay     delay;
     delay.Init(&line, 48000.0f);
-    delay.Update(kDelayTimeMinSeconds, 1.0f); // tiny target
+    delay.Update(kDelayTimeMinSeconds, 1.0f, 0.0f); // tiny target
     delay.Process(0.0f, 0.0f);                // settle near the tiny target
-    delay.Update(kDelayTimeMaxSeconds, 1.0f); // huge jump in target (~96000 samples)
+    delay.Update(kDelayTimeMaxSeconds, 1.0f, 0.0f); // huge jump in target (~96000 samples)
 
     float before = delay.CurrentDelaySamples();
     delay.Process(0.0f, 0.0f);
@@ -113,7 +112,7 @@ TEST_CASE("TapeDelay - lower speed lengthens the gap between repeats") {
     TapeDelayLine line;
     TapeDelay     delay;
     delay.Init(&line, 48000.0f);
-    delay.Update(100.0f / 48000.0f, 0.5f); // target 200 samples (100 / 0.5)
+    delay.Update(100.0f / 48000.0f, 0.5f, 0.0f); // target 200 samples (100 / 0.5)
 
     int firstRepeatSample = -1;
     for (int i = 0; i < 400; i++) {
@@ -131,7 +130,7 @@ TEST_CASE("TapeDelay - zero wobble and full speed reproduce ComputeDelaySamples 
     TapeDelayLine line;
     TapeDelay     delay;
     delay.Init(&line, 48000.0f);
-    delay.Update(50.0f / 48000.0f, 1.0f); // target 50 samples
+    delay.Update(50.0f / 48000.0f, 1.0f, 0.0f); // target 50 samples
 
     int firstRepeatSample = -1;
     for (int i = 0; i < 200; i++) {
@@ -152,11 +151,9 @@ TEST_CASE("TapeDelay - wobble affects delay timing as expected") {
     TapeDelay     delayNeg;
     delayPos.Init(&linePos, 48000.0f);
     delayNeg.Init(&lineNeg, 48000.0f);
-    delayPos.Update(100.0f / 48000.0f, 1.0f); // target 100 samples
-    delayNeg.Update(100.0f / 48000.0f, 1.0f);
+    delayPos.Update(100.0f / 48000.0f, 1.0f, 0.0f); // target 100 samples
+    delayNeg.Update(100.0f / 48000.0f, 1.0f, 0.0f);
 
-    // Positive wobble (higher speed) should shorten the delay;
-    // negative wobble (lower speed) should lengthen it.
     int posRepeatSample = -1;
     int negRepeatSample = -1;
 
@@ -171,8 +168,57 @@ TEST_CASE("TapeDelay - wobble affects delay timing as expected") {
             negRepeatSample = i;
     }
 
-    // Positive wobble halves the delay (100 -> 50 samples)
-    // Negative wobble doubles the delay (100 -> 200 samples)
     CHECK(posRepeatSample == 50);
     CHECK(negRepeatSample == 200);
+}
+
+TEST_CASE("TapeDelay - higher atmosphere sustains more repeats above a noise floor") {
+    TapeDelayLine lineLow, lineHigh;
+    TapeDelay     delayLow, delayHigh;
+    delayLow.Init(&lineLow, 48000.0f);
+    delayHigh.Init(&lineHigh, 48000.0f);
+    delayLow.Update(100.0f / 48000.0f, 1.0f, 0.0f);
+    delayHigh.Update(100.0f / 48000.0f, 1.0f, 1.0f);
+
+    auto countRepeatsAboveFloor = [](TapeDelay &delay) {
+        int   repeatsAbove = 0;
+        int   repeat       = 0;
+        float peak         = 0.0f;
+        for (int i = 0; i < 3000 && repeat < 10; i++) {
+            float in  = (i == 0) ? 1.0f : 0.0f;
+            float wet = delay.Process(in, 0.0f);
+            int   expectedCenter = (repeat + 1) * 100;
+            if (i >= expectedCenter - 5 && i <= expectedCenter + 15) {
+                if (fabsf(wet) > peak)
+                    peak = fabsf(wet);
+                if (i == expectedCenter + 15) {
+                    if (peak > 0.01f)
+                        repeatsAbove++;
+                    peak = 0.0f;
+                    repeat++;
+                }
+            }
+        }
+        return repeatsAbove;
+    };
+
+    CHECK(countRepeatsAboveFloor(delayHigh) > countRepeatsAboveFloor(delayLow));
+}
+
+TEST_CASE("TapeDelay - output stays bounded across many repeats even at maximum atmosphere") {
+    TapeDelayLine line;
+    TapeDelay     delay;
+    delay.Init(&line, 48000.0f);
+    delay.Update(100.0f / 48000.0f, 1.0f, 1.0f); // max atmosphere: highest feedback + drive
+
+    float maxAbs = 0.0f;
+    for (int i = 0; i < 5000; i++) {
+        float in  = (i == 0) ? 1.0f : 0.0f;
+        float wet = delay.Process(in, 0.0f);
+        maxAbs    = daisysp::fmax(maxAbs, fabsf(wet));
+    }
+    // SoftClip in the feedback loop bounds the sustained tail well
+    // under the original impulse -- 1.05 gives headroom over the
+    // observed ~1.0 ceiling without loosening the check to meaninglessness.
+    CHECK(maxAbs <= 1.05f);
 }
