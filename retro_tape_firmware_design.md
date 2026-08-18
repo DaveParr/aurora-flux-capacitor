@@ -222,30 +222,83 @@ void AudioCallback(float** in, float** out, size_t size) {
 
 ## Development Phases
 
-1. **Phase 1: Base Pitch Bend**
+1. **Phase 1: Base Pitch Bend** — ✅ Done (`v0.1.0`)
    - Implement WARP knob/CV → `PitchShifter` transpose
    - Verify smooth pitch tracking
+   - See [`2026-08-15-flux-capacitor-phase1-pitch-bend-design.md`](docs/superpowers/specs/2026-08-15-flux-capacitor-phase1-pitch-bend-design.md)
 
-2. **Phase 2: Tape Stop**
+2. **Phase 2: Tape Stop** — ✅ Done (`v0.1.0`)
    - Implement `TapeTransport` state machine
    - Tie `speed` to pitch shift
    - Add FREEZE button/gate control
+   - See [`2026-08-16-flux-capacitor-phase2-tape-stop-design.md`](docs/superpowers/specs/2026-08-16-flux-capacitor-phase2-tape-stop-design.md)
 
-3. **Phase 3: Wow and Flutter**
+3. **Phase 3: Wow and Flutter** — ✅ Done (`v0.1.0`)
    - Implement `WowFlutter` with LFO and noise
    - Modulate `PitchShifter` and/or `speed`
    - Add REFLECT/BLUR knob/CV control
+   - See [`2026-08-16-flux-capacitor-phase3-wow-flutter-design.md`](docs/superpowers/specs/2026-08-16-flux-capacitor-phase3-wow-flutter-design.md)
 
-4. **Phase 4: Tape Delay**
+4. **Phase 4: Tape Delay** — ✅ Done (`v0.2.0`)
    - Implement `TapeDelay` with `DelayLine`
    - Add wow/flutter modulation to delay time
    - Couple delay to `speed` for slowdown effect
+   - See [`2026-08-16-flux-capacitor-phase4-tape-delay-design.md`](docs/superpowers/specs/2026-08-16-flux-capacitor-phase4-tape-delay-design.md)
 
-5. **Phase 5: Polish and Modes**
-   - Add filtering and saturation (ATMOSPHERE)
-   - Implement REVERSE mode
-   - Add Shift+knob secondary pages
-   - Tune control ranges and curves
+5. **Phase 5: Polish and Modes** — In progress. Every phase 1-4 spec's
+   "Out of scope" section deferred these items here explicitly; this is
+   their consolidated scope, not new material. Phase 5 was decomposed
+   into independent sub-projects during brainstorming (too large for one
+   spec); each sub-project gets its own spec under
+   `docs/superpowers/specs/`.
+
+   - **ATMOSPHERE knob/CV** — ✅ Done (no version tag cut yet). Tone-shaping
+     lowpass (darkens further as tape-stop speed falls, even at
+     ATMOSPHERE fully counterclockwise), saturation (main signal path and
+     `TapeDelay`'s feedback loop), and a variable feedback-*amount*
+     control for `TapeDelay` (replacing the old fixed `kTapeDelayFeedback
+     = 0.35`) are all driven together from the one ATMOSPHERE knob/CV as
+     a single "coloration" scalar. Past roughly noon the delay's feedback
+     sustains and gently self-oscillates rather than decaying — verified
+     bounded (converges, doesn't run away) both analytically and on
+     hardware. See
+     [`2026-08-17-flux-capacitor-phase5-atmosphere-design.md`](docs/superpowers/specs/2026-08-17-flux-capacitor-phase5-atmosphere-design.md).
+     A whole-branch review caught and fixed a real instability bug before
+     merge (the tone-lowpass's minimum time constant produced an
+     out-of-range filter coefficient that would have NaN'd the module on
+     every power-on) — see that spec's amended "Tone lowpass" and
+     "`TapeDelay` changes" sections for the corrected constants and full
+     rationale.
+   - **REVERSE mode** (`SW_REVERSE`/`GATE_REVERSE`, wired into the SDK,
+     unread by the firmware): reverse tape playback; parent doc notes it
+     should also flip `TapeDelay`'s read direction
+   - **Shift+knob secondary pages** (`SW_SHIFT`, wired into the SDK,
+     unread by the firmware) — each sub-item below is a fixed constant
+     today that becomes Shift-page-adjustable:
+     - Shift+WARP: pitch-bend range select (±1/±2/±3 octaves) — fixed
+       ±12 semitones today (`warp_control.h`)
+     - Shift+TIME: stop-rate curve (linear vs exponential) — fixed
+       `kStopRampTimeSeconds = 0.217f` today (`main.cpp`)
+     - Shift+BLUR: flutter type (noise vs multi-sine) — fixed
+       filtered-white-noise today (`wow_flutter.h`)
+     - Shift+REFLECT: wow waveform (sine/triangle/complex) — fixed sine
+       today (`wow_flutter.h`)
+     - Shift+MIX: input gain/trim — unimplemented
+     - Shift+FREEZE: stop-mode select (full stop vs slow-down without
+       full stop) — only one stop mode exists today (`tape_transport.h`)
+     - Shift+ATMOSPHERE: independently-adjustable saturation amount
+       (decoupled from the main ATMOSPHERE knob's combined coloration) —
+       now unblocked, since ATMOSPHERE's primary function has landed
+   - **Tune control ranges and curves**: explicit line item in this
+     doc's original phase breakdown — a pass revisiting the fixed
+     constants above (stop ramp time, wow depth, flutter depth range,
+     TIME's log-curve steepness, and ATMOSPHERE's tau/saturation-drive/
+     feedback-amount ranges, all still provisional) by ear now that
+     the full signal chain exists, not just each piece in isolation
+   - **Optional/stretch, not required for Phase 5 baseline**:
+     cross-channel (ping-pong) delay feedback — `TapeDelay`'s Phase 4
+     spec called this out as explicitly deferred but not something the
+     parent doc's feature list actually asks for
 
 ## References
 
